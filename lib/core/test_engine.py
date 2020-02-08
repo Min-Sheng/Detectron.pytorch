@@ -29,6 +29,7 @@ import os
 import yaml
 
 import torch
+import torch.nn as nn
 
 from core.config import cfg
 # from core.rpn_generator import generate_rpn_on_dataset  #TODO: for rpn only case

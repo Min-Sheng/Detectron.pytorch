@@ -25,6 +25,7 @@ from email.mime.text import MIMEText
 import json
 import logging
 import numpy as np
+import torch
 import smtplib
 import sys
 
@@ -82,10 +83,10 @@ class SmoothedValue(object):
         self.total += value
 
     def GetMedianValue(self):
-        return np.median(self.deque)
+        return torch.median(torch.stack(list(self.deque)))
 
     def GetAverageValue(self):
-        return np.mean(self.deque)
+        return torch.mean(torch.stack(list(self.deque)))
 
     def GetGlobalAverageValue(self):
         return self.total / self.count

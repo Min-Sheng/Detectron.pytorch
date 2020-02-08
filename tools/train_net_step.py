@@ -29,6 +29,7 @@ from utils.detectron_weight_helper import load_detectron_weight
 from utils.logging import setup_logging
 from utils.timer import Timer
 from utils.training_stats import TrainingStats
+from utils.logging import log_stats
 
 # Set up logging and load config options
 logger = setup_logging(__name__)
@@ -432,6 +433,9 @@ def main():
 
             if (step+1) % CHECKPOINT_PERIOD == 0:
                 save_ckpt(output_dir, args, step, train_size, maskRCNN, optimizer)
+            
+            if (step+1) % args.disp_interval == 0:
+                log_training_stats(training_stats, step, lr)
 
         # ---- Training ends ----
         # Save last checkpoint
@@ -449,6 +453,9 @@ def main():
         if args.use_tfboard and not args.no_save:
             tblogger.close()
 
+def log_training_stats(training_stats, global_step, lr):
+    stats = training_stats.GetStats(global_step, lr)
+    log_stats(stats, training_stats.misc_args)
 
 if __name__ == '__main__':
     main()

@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 
+from scipy.misc import imread
 from core.config import cfg
 import utils.blob as blob_utils
 import roi_data.rpn
@@ -55,9 +56,13 @@ def _get_image_blob(roidb):
     processed_ims = []
     im_scales = []
     for i in range(num_images):
-        im = cv2.imread(roidb[i]['image'])
+        #im = cv2.imread(roidb[i]['image'])
+        im = imread(roidb[i]['image'])
         assert im is not None, \
             'Failed to read image \'{}\''.format(roidb[i]['image'])
+        if len(im.shape) == 2:
+            im = im[:,:,np.newaxis]
+            im = np.concatenate((im,im,im), axis=2)
         # If NOT using opencv to read in images, uncomment following lines
         # if len(im.shape) == 2:
         #     im = im[:, :, np.newaxis]

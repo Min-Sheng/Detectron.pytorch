@@ -1,6 +1,9 @@
+import random
 import math
 import numpy as np
 import numpy.random as npr
+from collections import Counter
+from scipy.misc import imread
 
 import torch
 import torch.utils.data as data
@@ -15,24 +18,57 @@ import utils.blob as blob_utils
 
 
 class RoiDataLoader(data.Dataset):
-    def __init__(self, roidb, num_classes, training=True):
+    def __init__(self, roidb, query, num_classes, training=True):
         self._roidb = roidb
+        self._query = query
         self._num_classes = num_classes
         self.training = training
         self.DATA_SIZE = len(self._roidb)
+
+        self.filter()
+        self.probability()
 
     def __getitem__(self, index_tuple):
         index, ratio = index_tuple
         single_db = [self._roidb[index]]
         blobs, valid = get_minibatch(single_db)
+        
         #TODO: Check if minibatch is valid ? If not, abandon it.
         # Need to change _worker_loop in torch.utils.data.dataloader.py.
 
         # Squeeze batch dim
         for key in blobs:
-            if key != 'roidb':
+            if key != 'roidb' and key != 'gt_boxes':
                 blobs[key] = blobs[key].squeeze(axis=0)
 
+        
+        blobs['gt_boxes'] = [x for x in blobs['gt_boxes'] if x[-1] in self.list]
+        blobs['gt_boxes'] = np.array(blobs['gt_boxes'])
+        if self.training:
+            # Random choice query catgory
+            catgory = blobs['gt_boxes'][:,-1]
+            cand = np.unique(catgory)
+            if len(cand)==1:
+                choice = cand[0]
+            else:
+                p = []
+                for i in cand:
+                    p.append(self.show_time[i])
+                p = np.array(p)
+                p /= p.sum()
+                choice  = np.random.choice(cand,1,p=p)[0]
+            
+            # Get query image
+            query = self.load_query(choice)
+        else:
+            query = self.load_query(index, single_db[0]['img_id'])
+
+        blobs['query'] = query
+
+
+        if 'gt_boxes' in blobs: 
+            del blobs['gt_boxes']
+        
         if self._roidb[index]['need_crop']:
             self.crop_data(blobs, ratio)
             # Check bounding box
@@ -47,7 +83,7 @@ class RoiDataLoader(data.Dataset):
                         entry[key] = entry[key][valid_inds]
                 entry['segms'] = [entry['segms'][ind] for ind in valid_inds]
 
-        blobs['roidb'] = blob_utils.serialize(blobs['roidb'])  # CHECK: maybe we can serialize in collate_fn
+        #blobs['roidb'] = blob_utils.serialize(blobs['roidb'])  # CHECK: maybe we can serialize in collate_fn
 
         return blobs
 
@@ -111,9 +147,107 @@ class RoiDataLoader(data.Dataset):
             np.clip(boxes[:, 0], 0, size_crop - 1, out=boxes[:, 0])
             np.clip(boxes[:, 2], 0, size_crop - 1, out=boxes[:, 2])
             blobs['roidb'][0]['boxes'] = boxes
+    
+    def load_query(self, choice, id=0):
+    
+        if self.training:
+            # Random choice query catgory image
+            all_data = self._query[choice]
+            data = random.choice(all_data)
+        else:
+            # Take out the purpose category for testing
+            catgory = self.cat_list[choice]
+            # list all the candidate image 
+            all_data = self._query[catgory]
+
+            # Use image_id to determine the random seed
+            # The list l is candidate sequence, which random by image_id
+            random.seed(id)
+            l = list(range(len(all_data)))
+            random.shuffle(l)
+
+            # choose the candidate sequence and take out the data information
+            position = l[self.query_position%len(l)]
+            data = all_data[position]
+
+        # Get image
+        path = data['image_path']
+        im = imread(path)
+        
+
+        if len(im.shape) == 2:
+            im = im[:,:,np.newaxis]
+            im = np.concatenate((im,im,im), axis=2)
+
+        im = blob_utils.crop(im, data['boxes'], cfg.TRAIN.QUERY_SIZE)
+        # flip the channel, since the original one using cv2
+        # rgb -> bgr
+        # im = im[:,:,::-1]
+        if random.randint(0,99)/100 > 0.5 and self.training:
+            im = im[:, ::-1, :]
+
+
+        im, im_scale = blob_utils.prep_im_for_blob(im,  cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
+        
+        query = blob_utils.im_list_to_blob(im)
+
+        return query
 
     def __len__(self):
         return self.DATA_SIZE
+
+    def filter(self):
+
+        folds = {
+            'all': set(range(1, 15)),
+            1: set(range(1, 13)) - set(range(1, 3)),
+            2: set(range(1, 13)) - set(range(3, 6)),
+            3: set(range(1, 13)) - set(range(6, 9)),
+            4: set(range(1, 13)) - set(range(9, 11)),
+            5: set(range(1, 13)) - set(range(11, 13)),
+            6: set(range(13, 15))
+            }
+
+        if cfg.SEEN==1:
+            self.list = cfg.TRAIN.CATEGORIES
+            # Group number to class
+            if len(self.list)==1:
+                self.list = list(folds[self.list[0]])
+
+        elif cfg.SEEN==2:
+            self.list = cfg.TEST.CATEGORIES
+            # Group number to class
+            if len(self.list)==1:
+                if self.list[0] != 6:
+                    self.list = list(folds['all'] - folds[self.list[0]] - folds[6])
+                else:
+                    self.list = list(folds[6])
+        
+        elif cfg.SEEN==3:
+            self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
+            # Group number to class
+            if len(self.list)==2:
+                self.list =list(folds[self.list['all']] - folds[6])
+
+    def probability(self):
+        show_time = {}
+        for i in self.list:
+            show_time[i] = 0
+        for roi in self._roidb:
+            result = Counter(roi['gt_classes'])
+            for t in result:
+                if t in self.list:
+                    show_time[t] += result[t]
+
+        for i in self.list:
+            show_time[i] = 1/show_time[i]
+
+        sum_prob = sum(show_time.values())
+
+        for i in self.list:
+            show_time[i] = show_time[i]/sum_prob
+        
+        self.show_time = show_time
 
 
 def cal_minibatch_ratio(ratio_list):

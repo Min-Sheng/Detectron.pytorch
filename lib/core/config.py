@@ -41,11 +41,15 @@ __C.TRAIN.DATASETS = ()
 
 __C.TRAIN.CATEGORIES = [1]
 
+# For COCO, setting USE_ALL_GT to False will exclude boxes that are flagged as ''iscrowd''
+__C.TRAIN.USE_ALL_GT = True
+
 # Scales to use during training
 # Each scale is the pixel size of an image's shortest side
 # If multiple scales are listed, then one is selected uniformly at random for
 # each training image (i.e., scale jitter data augmentation)
 __C.TRAIN.SCALES = (600, )
+__C.TRAIN.QUERY_SIZE = 64
 
 # Max pixel size of the longest side of a scaled input image
 __C.TRAIN.MAX_SIZE = 1000

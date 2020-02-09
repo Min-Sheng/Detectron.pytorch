@@ -62,9 +62,10 @@ def add_rpn_blobs(blobs, im_scales, roidb):
         scale = im_scales[im_i]
         im_height = np.round(entry['height'] * scale)
         im_width = np.round(entry['width'] * scale)
-        gt_inds = np.where(
-            (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0)
-        )[0]
+        #gt_inds = np.where(
+        #    (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0)
+        #)[0]
+        gt_inds = np.where(entry['gt_classes'] > 0)[0]
         gt_rois = entry['boxes'][gt_inds, :] * scale
         # TODO(rbg): gt_boxes is poorly named;
         # should be something like 'gt_rois_info'
@@ -72,6 +73,7 @@ def add_rpn_blobs(blobs, im_scales, roidb):
         gt_boxes[:, 0] = im_i  # batch inds
         gt_boxes[:, 1:5] = gt_rois
         gt_boxes[:, 5] = entry['gt_classes'][gt_inds]
+        blobs['gt_boxes'] = gt_boxes
         im_info = np.array([[im_height, im_width, scale]], dtype=np.float32)
         blobs['im_info'].append(im_info)
 

@@ -24,6 +24,7 @@ __C = AttrDict()
 #   from fast_rcnn_config import cfg
 cfg = __C
 
+__C.SEEN = 1
 
 # Random note: avoid using '.ON' as a config key since yaml converts it to True;
 # prefer 'ENABLED' instead
@@ -37,6 +38,8 @@ __C.TRAIN = AttrDict()
 # Available dataset list: datasets.dataset_catalog.DATASETS.keys()
 # If multiple datasets are listed, the model is trained on their union
 __C.TRAIN.DATASETS = ()
+
+__C.TRAIN.CATEGORIES = [1]
 
 # Scales to use during training
 # Each scale is the pixel size of an image's shortest side
@@ -180,6 +183,7 @@ __C.TEST = AttrDict()
 # Available dataset list: datasets.dataset_catalog.DATASETS.keys()
 # If multiple datasets are listed, testing is performed on each one sequentially
 __C.TEST.DATASETS = ()
+__C.TEST.CATEGORIES = [1]
 
 # Scale to use during testing (can NOT list multiple scales)
 # The scale is the pixel size of an image's shortest side
@@ -405,7 +409,7 @@ __C.MODEL.NUM_CLASSES = -1
 
 # Use a class agnostic bounding box regressor instead of the default per-class
 # regressor
-__C.MODEL.CLS_AGNOSTIC_BBOX_REG = False
+__C.MODEL.CLS_AGNOSTIC_BBOX_REG = True
 
 # Default weights on (dx, dy, dw, dh) for normalizing bbox regression targets
 # These are empirically chosen to approximately lead to unit variance targets
@@ -512,7 +516,7 @@ __C.RETINANET.SHARE_CLS_BBOX_TOWER = False
 
 # Use class specific bounding box regression instead of the default class
 # agnostic regression
-__C.RETINANET.CLASS_SPECIFIC_BBOX = False
+__C.RETINANET.CLASS_SPECIFIC_BBOX = True
 
 # Whether softmax should be used in classification branch training
 __C.RETINANET.SOFTMAX = False
@@ -767,7 +771,7 @@ __C.MRCNN.CONV_INIT = 'GaussianFill'
 
 # Use class specific mask predictions if True (otherwise use class agnostic mask
 # predictions)
-__C.MRCNN.CLS_SPECIFIC_MASK = True
+__C.MRCNN.CLS_SPECIFIC_MASK = False
 
 # Multi-task loss weight for masks
 __C.MRCNN.WEIGHT_LOSS_MASK = 1.0

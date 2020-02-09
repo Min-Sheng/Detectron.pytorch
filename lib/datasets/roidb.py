@@ -29,7 +29,7 @@ import utils.keypoints as keypoint_utils
 import utils.segms as segm_utils
 import utils.blob as blob_utils
 from core.config import cfg
-from .json_dataset import JsonDataset
+from .fss_cell import JsonDataset
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +46,13 @@ def combined_roidb_for_training(dataset_names, proposal_files):
             proposal_file=proposal_file,
             crowd_filter_thresh=cfg.TRAIN.CROWD_FILTER_THRESH
         )
+        
+        roidb = ds.filter(roidb)
         if cfg.TRAIN.USE_FLIPPED:
             logger.info('Appending horizontally-flipped training examples...')
             extend_with_flipped_entries(roidb, ds)
         logger.info('Loaded dataset: {:s}'.format(ds.name))
-        return roidb
+        return roidb, ds.cat_data, ds.inverse_list
 
     if isinstance(dataset_names, six.string_types):
         dataset_names = (dataset_names, )
@@ -59,10 +61,24 @@ def combined_roidb_for_training(dataset_names, proposal_files):
     if len(proposal_files) == 0:
         proposal_files = (None, ) * len(dataset_names)
     assert len(dataset_names) == len(proposal_files)
-    roidbs = [get_roidb(*args) for args in zip(dataset_names, proposal_files)]
+
+    roidbs = []
+    querys = []
+    for args in zip(dataset_names, proposal_files):
+        roidb, query, reserved = get_roidb(*args)
+        roidbs.append(roidb)
+        query_filterd = {k: [x for i, x in enumerate(v) if x['area']>300] for k, v in query.items()}
+        querys.append(query_filterd)
+
     roidb = roidbs[0]
-    for r in roidbs[1:]:
-        roidb.extend(r)
+    query = querys[0]
+
+    if len(roidbs) > 1:
+        for r in roidbs[1:]:
+            roidb.extend(r)
+        for r in range(len(querys[0])):
+            query[r].extend(querys[1][r])
+
     roidb = filter_for_training(roidb)
 
     if cfg.TRAIN.ASPECT_GROUPING or cfg.TRAIN.ASPECT_CROPPING:
@@ -78,7 +94,7 @@ def combined_roidb_for_training(dataset_names, proposal_files):
 
     _compute_and_log_stats(roidb)
 
-    return roidb, ratio_list, ratio_index
+    return roidb, ratio_list, ratio_index, query
 
 
 def extend_with_flipped_entries(roidb, dataset):
@@ -198,7 +214,8 @@ def _compute_targets(entry):
     rois = entry['boxes']
     overlaps = entry['max_overlaps']
     labels = entry['max_classes']
-    gt_inds = np.where((entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
+    #gt_inds = np.where((entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
+    gt_inds = np.where(entry['gt_classes'] > 0)[0]
     # Targets has format (class, tx, ty, tw, th)
     targets = np.zeros((rois.shape[0], 5), dtype=np.float32)
     if len(gt_inds) == 0:
@@ -234,8 +251,9 @@ def _compute_and_log_stats(roidb):
     # Histogram of ground-truth objects
     gt_hist = np.zeros((len(classes)), dtype=np.int)
     for entry in roidb:
-        gt_inds = np.where(
-            (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
+        #gt_inds = np.where(
+        #    (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
+        gt_inds = np.where(entry['gt_classes'] > 0)[0]
         gt_classes = entry['gt_classes'][gt_inds]
         gt_hist += np.histogram(gt_classes, bins=hist_bins)[0]
     logger.debug('Ground-truth class histogram:')

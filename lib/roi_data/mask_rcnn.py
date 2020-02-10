@@ -36,10 +36,14 @@ def add_mask_rcnn_blobs(blobs, sampled_boxes, roidb, im_scale, batch_idx):
     # Prepare the mask targets by associating one gt mask to each training roi
     # that has a fg (non-bg) class label.
     M = cfg.MRCNN.RESOLUTION
-    polys_gt_inds = np.where((roidb['gt_classes'] > 0) &
-                             (roidb['is_crowd'] == 0))[0]
+    #polys_gt_inds = np.where((roidb['gt_classes'] > 0) &
+    #                         (roidb['is_crowd'] == 0))[0]
+    polys_gt_inds = np.where(roidb['gt_classes'] > 0)[0]
     polys_gt = [roidb['segms'][i] for i in polys_gt_inds]
-    boxes_from_polys = segm_utils.polys_to_boxes(polys_gt)
+    if isinstance(polys_gt[0], dict):
+        boxes_from_polys = segm_utils.rle_masks_to_boxes(polys_gt)[0]
+    else:
+        boxes_from_polys = segm_utils.polys_to_boxes(polys_gt)
     # boxes_from_polys = [roidb['boxes'][i] for i in polys_gt_inds]
     fg_inds = np.where(blobs['labels_int32'] > 0)[0]
     roi_has_mask = blobs['labels_int32'].copy()
@@ -67,7 +71,10 @@ def add_mask_rcnn_blobs(blobs, sampled_boxes, roidb, im_scale, batch_idx):
             roi_fg = rois_fg[i]
             # Rasterize the portion of the polygon mask within the given fg roi
             # to an M x M binary image
-            mask = segm_utils.polys_to_mask_wrt_box(poly_gt, roi_fg, M)
+            if isinstance(poly_gt, dict):
+                mask = segm_utils.rle_mask_wrt_box(poly_gt, roi_fg, M)
+            else:
+                mask = segm_utils.polys_to_mask_wrt_box(poly_gt, roi_fg, M)
             mask = np.array(mask > 0, dtype=np.int32)  # Ensure it's binary
             masks[i, :] = np.reshape(mask, M**2)
     else:  # If there are no fg masks (it does happen)

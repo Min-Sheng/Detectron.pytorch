@@ -42,6 +42,8 @@ from .dataset_catalog import DATASETS
 from .dataset_catalog import IM_DIR
 from .dataset_catalog import IM_PREFIX
 
+import pycocotools.mask as mask_util
+
 logger = logging.getLogger(__name__)
 
 
@@ -278,8 +280,14 @@ class JsonDataset(object):
             if obj['area'] > 0 and x2 > x1 and y2 > y1:
                 obj['clean_bbox'] = [x1, y1, x2, y2]
                 valid_objs.append(obj)
-                valid_segms.append(obj['segmentation'])
-                
+                # Compress the rle
+                if 'counts' in obj['segmentation'] and type(obj['segmentation']['counts']) == list:
+                    # Magic RLE format handling painfully discovered by looking at the
+                    # COCO API showAnns function.
+                    rle = mask_util.frPyObjects(obj['segmentation'], height, width)
+                    valid_segms.append(rle)
+                else:
+                    valid_segms.append(obj['segmentation'])
                 query = {
                         'boxes': obj['clean_bbox'],
                         'segms': valid_segms,

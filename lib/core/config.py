@@ -62,7 +62,7 @@ __C.TRAIN.IMS_PER_BATCH = 2
 # Total number of RoIs per training minibatch =
 #   TRAIN.BATCH_SIZE_PER_IM * TRAIN.IMS_PER_BATCH * NUM_GPUS
 # E.g., a common configuration is: 512 * 2 * 8 = 8192
-__C.TRAIN.BATCH_SIZE_PER_IM = 64
+__C.TRAIN.BATCH_SIZE_PER_IM = 256
 
 # Fraction of minibatch that is labeled foreground (i.e. class > 0)
 __C.TRAIN.FG_FRACTION = 0.25
@@ -92,7 +92,7 @@ __C.TRAIN.PROPOSAL_FILES = ()
 # Snapshot (model checkpoint) period
 # Divide by NUM_GPUS to determine actual period (e.g., 20000/8 => 2500 iters)
 # to allow for linear training schedule scaling
-__C.TRAIN.SNAPSHOT_ITERS = 20000
+__C.TRAIN.SNAPSHOT_ITERS = 1000 #20000
 
 # Normalize the targets (subtract empirical mean, divide by empirical stddev)
 __C.TRAIN.BBOX_NORMALIZE_TARGETS = True
@@ -153,18 +153,18 @@ __C.TRAIN.RPN_STRADDLE_THRESH = 0
 
 # Proposal height and width both need to be greater than RPN_MIN_SIZE
 # (at orig image scale; not scale used during training or inference)
-__C.TRAIN.RPN_MIN_SIZE = 0
+__C.TRAIN.RPN_MIN_SIZE = 8
 
 # Filter proposals that are inside of crowd regions by CROWD_FILTER_THRESH
 # "Inside" is measured as: proposal-with-crowd intersection area divided by
 # proposal area
-__C.TRAIN.CROWD_FILTER_THRESH = 0.7
+__C.TRAIN.CROWD_FILTER_THRESH = 0 #0.7
 
 # Ignore ground-truth objects with area < this threshold
 __C.TRAIN.GT_MIN_AREA = -1
 
 # Freeze the backbone architecture during training if set to True
-__C.TRAIN.FREEZE_CONV_BODY = False
+__C.TRAIN.FREEZE_CONV_BODY = True #False
 
 
 # ---------------------------------------------------------------------------- #
@@ -198,7 +198,7 @@ __C.TEST.MAX_SIZE = 1000
 
 # Overlap threshold used for non-maximum suppression (suppress boxes with
 # IoU >= this threshold)
-__C.TEST.NMS = 0.3
+__C.TEST.NMS = 0.5
 
 # Apply Fast R-CNN style bounding-box regression if True
 __C.TEST.BBOX_REG = True
@@ -214,20 +214,20 @@ __C.TEST.RPN_NMS_THRESH = 0.7
 
 # Number of top scoring RPN proposals to keep before applying NMS
 # When FPN is used, this is *per FPN level* (not total)
-__C.TEST.RPN_PRE_NMS_TOP_N = 12000
+__C.TEST.RPN_PRE_NMS_TOP_N = 6000 #12000
 
 # Number of top scoring RPN proposals to keep after applying NMS
 # This is the total number of RPN proposals produced (for both FPN and non-FPN
 # cases)
-__C.TEST.RPN_POST_NMS_TOP_N = 2000
+__C.TEST.RPN_POST_NMS_TOP_N = 1000 #2000
 
 # Proposal height and width both need to be greater than RPN_MIN_SIZE
 # (at orig image scale; not scale used during training or inference)
-__C.TEST.RPN_MIN_SIZE = 0
+__C.TEST.RPN_MIN_SIZE = 8
 
 # Maximum number of detections to return per image (100 is based on the limit
 # established for the COCO dataset)
-__C.TEST.DETECTIONS_PER_IM = 100
+__C.TEST.DETECTIONS_PER_IM = 500
 
 # Minimum score threshold (assuming scores in a [0, 1] range); a value chosen to
 # balance obtaining high recall with not having too many low precision
@@ -242,7 +242,7 @@ __C.TEST.COMPETITION_MODE = True
 # Evaluate detections with the COCO json dataset eval code even if it's not the
 # evaluation code for the dataset (e.g. evaluate PASCAL VOC results using the
 # COCO API to get COCO style AP on PASCAL VOC)
-__C.TEST.FORCE_JSON_DATASET_EVAL = False
+__C.TEST.FORCE_JSON_DATASET_EVAL = True
 
 # [Inferred value; do not set directly in a config]
 # Indicates if precomputed proposals are used at test time
@@ -367,9 +367,9 @@ __C.TEST.KPS_AUG.ASPECT_RATIO_H_FLIP = False
 __C.TEST.SOFT_NMS = AttrDict()
 
 # Use soft NMS instead of standard NMS if set to True
-__C.TEST.SOFT_NMS.ENABLED = False
+__C.TEST.SOFT_NMS.ENABLED = True #False
 # See soft NMS paper for definition of these options
-__C.TEST.SOFT_NMS.METHOD = 'linear'
+__C.TEST.SOFT_NMS.METHOD = 'gaussian'
 __C.TEST.SOFT_NMS.SIGMA = 0.5
 # For the soft NMS overlap threshold, we simply use TEST.NMS
 
@@ -607,7 +607,7 @@ __C.SOLVER.WARM_UP_METHOD = 'linear'
 
 # Scale the momentum update history by new_lr / old_lr when updating the
 # learning rate (this is correct given MomentumSGDUpdateOp)
-__C.SOLVER.SCALE_MOMENTUM = True
+__C.SOLVER.SCALE_MOMENTUM = False #True
 # Only apply the correction if the relative LR change exceeds this threshold
 # (prevents ever change in linear warm up from scaling the momentum by a tiny
 # amount; momentum scaling is only important if the LR change is large)
@@ -672,7 +672,7 @@ __C.RPN.CLS_ACTIVATION = 'sigmoid'
 
 # RPN anchor sizes given in absolute pixels w.r.t. the scaled network input
 # Note: these options are *not* used by FPN RPN; see FPN.RPN* options
-__C.RPN.SIZES = (64, 128, 256, 512)
+__C.RPN.SIZES = (16, 32, 64, 128)
 
 # Stride of the feature map that RPN is attached
 __C.RPN.STRIDE = 16
@@ -725,7 +725,7 @@ __C.FPN.RPN_ASPECT_RATIOS = (0.5, 1, 2)
 # RPN anchors start at this size on RPN_MIN_LEVEL
 # The anchor size doubled each level after that
 # With a default of 32 and levels 2 to 6, we get anchor sizes of 32 to 512
-__C.FPN.RPN_ANCHOR_START_SIZE = 32
+__C.FPN.RPN_ANCHOR_START_SIZE = 16
 # [Infered Value] Scale for RPN_POST_NMS_TOP_N.
 # Automatically infered in training, fixed to 1 in testing.
 __C.FPN.RPN_COLLECT_SCALE = 1

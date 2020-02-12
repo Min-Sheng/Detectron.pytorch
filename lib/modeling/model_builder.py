@@ -20,6 +20,8 @@ import utils.blob as blob_utils
 import utils.net as net_utils
 import utils.resnet_weights_helper as resnet_utils
 
+import modeling.matching as matching
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,6 +82,9 @@ class Generalized_RCNN(nn.Module):
         # Backbone for feature extraction
         self.Conv_Body = get_func(cfg.MODEL.CONV_BODY)()
 
+        # Matching Mechanism
+        self.match_net = matching.match_block(self.Conv_Body.dim_out)
+
         # Region Proposal Network
         if cfg.RPN.RPN_ON:
             self.RPN = rpn_heads.generic_rpn_outputs(
@@ -137,15 +142,16 @@ class Generalized_RCNN(nn.Module):
             for p in self.Conv_Body.parameters():
                 p.requires_grad = False
 
-    def forward(self, data, im_info, roidb=None, **rpn_kwargs):
+    def forward(self, data, query, im_info, roidb=None, **rpn_kwargs):
         if cfg.PYTORCH_VERSION_LESS_THAN_040:
-            return self._forward(data, im_info, roidb, **rpn_kwargs)
+            return self._forward(data, query, im_info, roidb, **rpn_kwargs)
         else:
             with torch.set_grad_enabled(self.training):
-                return self._forward(data, im_info, roidb, **rpn_kwargs)
+                return self._forward(data, query, im_info, roidb, **rpn_kwargs)
 
-    def _forward(self, data, im_info, roidb=None, **rpn_kwargs):
+    def _forward(self, data, query, im_info, roidb=None, **rpn_kwargs):
         im_data = data
+        query = query.permute(1,0,2,3,4)
         if self.training:
             roidb = list(map(lambda x: blob_utils.deserialize(x)[0], roidb))
 
@@ -153,9 +159,13 @@ class Generalized_RCNN(nn.Module):
 
         return_dict = {}  # A dict to collect return variables
 
+        # feed image data to base model to obtain base feature map
         blob_conv = self.Conv_Body(im_data)
+        query_conv = self.Conv_Body(query[0])
 
-        rpn_ret = self.RPN(blob_conv, im_info, roidb)
+        rpn_feat, act_feat, act_aim, c_weight = self.match_net(blob_conv, query_conv)
+
+        rpn_ret = self.RPN(rpn_feat, im_info, roidb)
 
         # if self.training:
         #     # can be used to infer fg/bg ratio
@@ -164,16 +174,16 @@ class Generalized_RCNN(nn.Module):
         if cfg.FPN.FPN_ON:
             # Retain only the blobs that will be used for RoI heads. `blob_conv` may include
             # extra blobs that are used for RPN proposals, but not for RoI heads.
-            blob_conv = blob_conv[-self.num_roi_levels:]
+            rpn_feat = rpn_feat[-self.num_roi_levels:]
 
         if not self.training:
-            return_dict['blob_conv'] = blob_conv
+            return_dict['blob_conv'] = rpn_feat
 
         if not cfg.MODEL.RPN_ONLY:
             if cfg.MODEL.SHARE_RES5 and self.training:
-                box_feat, res5_feat = self.Box_Head(blob_conv, rpn_ret)
+                box_feat, res5_feat = self.Box_Head(act_feat, rpn_ret)
             else:
-                box_feat = self.Box_Head(blob_conv, rpn_ret)
+                box_feat = self.Box_Head(act_feat, rpn_ret)
             cls_score, bbox_pred = self.Box_Outs(box_feat)
         else:
             # TODO: complete the returns for RPN only situation
@@ -209,7 +219,7 @@ class Generalized_RCNN(nn.Module):
                     mask_feat = self.Mask_Head(res5_feat, rpn_ret,
                                                roi_has_mask_int32=rpn_ret['roi_has_mask_int32'])
                 else:
-                    mask_feat = self.Mask_Head(blob_conv, rpn_ret)
+                    mask_feat = self.Mask_Head(act_feat, rpn_ret)
                 mask_pred = self.Mask_Outs(mask_feat)
                 # return_dict['mask_pred'] = mask_pred
                 # mask loss
@@ -223,7 +233,7 @@ class Generalized_RCNN(nn.Module):
                     kps_feat = self.Keypoint_Head(res5_feat, rpn_ret,
                                                   roi_has_keypoints_int32=rpn_ret['roi_has_keypoint_int32'])
                 else:
-                    kps_feat = self.Keypoint_Head(blob_conv, rpn_ret)
+                    kps_feat = self.Keypoint_Head(act_feat, rpn_ret)
                 kps_pred = self.Keypoint_Outs(kps_feat)
                 # return_dict['keypoints_pred'] = kps_pred
                 # keypoints loss

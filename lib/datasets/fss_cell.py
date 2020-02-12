@@ -160,7 +160,8 @@ class JsonDataset(object):
             proposal_file=None,
             min_proposal_size=2,
             proposal_limit=-1,
-            crowd_filter_thresh=0
+            crowd_filter_thresh=0,
+            training=True
         ):
         """Return an roidb corresponding to the json dataset. Optionally:
            - include ground truth boxes in the roidb
@@ -203,7 +204,7 @@ class JsonDataset(object):
                     with open(cache_filepath, 'wb') as fp:
                         pickle.dump([roidb, self.cat_data], fp, pickle.HIGHEST_PROTOCOL)
                     logger.info('Cache ground truth roidb to %s', cache_filepath)
-        if proposal_file is not None:
+        if proposal_file is not None and training:
             # Include proposals from a file
             self.debug_timer.tic()
             self._add_proposals_from_file(

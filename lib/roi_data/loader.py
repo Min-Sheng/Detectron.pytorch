@@ -3,6 +3,7 @@ import math
 import numpy as np
 import numpy.random as npr
 from collections import Counter
+import cv2
 from scipy.misc import imread
 
 import torch
@@ -18,12 +19,20 @@ import utils.blob as blob_utils
 
 
 class RoiDataLoader(data.Dataset):
-    def __init__(self, roidb, query, num_classes, training=True):
+    def __init__(self, roidb, ratio_list, ratio_index, query, num_classes, training=True):
         self._roidb = roidb
         self._query = query
         self._num_classes = num_classes
         self.training = training
         self.DATA_SIZE = len(self._roidb)
+        self.ratio_list = ratio_list
+        self.query_position = 0
+
+        if training:
+            self.ratio_index = ratio_index
+        else:
+            self.cat_list = ratio_index[1]
+            self.ratio_index = ratio_index[0]
 
         self.filter()
         self.probability()
@@ -44,6 +53,8 @@ class RoiDataLoader(data.Dataset):
         
         blobs['gt_boxes'] = [x for x in blobs['gt_boxes'] if x[-1] in self.list]
         blobs['gt_boxes'] = np.array(blobs['gt_boxes'])
+
+        
         if self.training:
             # Random choice query catgory
             catgory = blobs['gt_boxes'][:,-1]
@@ -61,7 +72,7 @@ class RoiDataLoader(data.Dataset):
             # Get query image
             query = self.load_query(choice)
         else:
-            query = self.load_query(index, single_db[0]['img_id'])
+            query = self.load_query(index, single_db[0]['id'])
 
         blobs['query'] = query
 
@@ -172,7 +183,8 @@ class RoiDataLoader(data.Dataset):
 
         # Get image
         path = data['image_path']
-        im = imread(path)
+        im = cv2.imread(path)
+        #im = imread(path)
         
 
         if len(im.shape) == 2:
@@ -279,10 +291,11 @@ def cal_minibatch_ratio(ratio_list):
 
 
 class MinibatchSampler(torch_sampler.Sampler):
-    def __init__(self, ratio_list, ratio_index):
+    def __init__(self, ratio_list, ratio_index, shuffle=True):
         self.ratio_list = ratio_list
         self.ratio_index = ratio_index
         self.num_data = len(ratio_list)
+        self.shuffle = shuffle
 
         if cfg.TRAIN.ASPECT_GROUPING:
             # Given the ratio_list, we want to make the ratio same
@@ -295,15 +308,20 @@ class MinibatchSampler(torch_sampler.Sampler):
             n, rem = divmod(self.num_data, cfg.TRAIN.IMS_PER_BATCH)
             round_num_data = n * cfg.TRAIN.IMS_PER_BATCH
             indices = np.arange(round_num_data)
-            npr.shuffle(indices.reshape(-1, cfg.TRAIN.IMS_PER_BATCH))  # inplace shuffle
+            if self.shuffle:
+                npr.shuffle(indices.reshape(-1, cfg.TRAIN.IMS_PER_BATCH))  # inplace shuffle
             if rem != 0:
                 indices = np.append(indices, np.arange(round_num_data, round_num_data + rem))
             ratio_index = self.ratio_index[indices]
             ratio_list_minibatch = self.ratio_list_minibatch[indices]
         else:
-            rand_perm = npr.permutation(self.num_data)
-            ratio_list = self.ratio_list[rand_perm]
-            ratio_index = self.ratio_index[rand_perm]
+            if self.shuffle:
+                rand_perm = npr.permutation(self.num_data)
+                ratio_list = self.ratio_list[rand_perm]
+                ratio_index = self.ratio_index[rand_perm]
+            else:
+                ratio_list = self.ratio_list
+                ratio_index = self.ratio_index
             # re-calculate minibatch ratio list
             ratio_list_minibatch = cal_minibatch_ratio(ratio_list)
 

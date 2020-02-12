@@ -22,14 +22,13 @@ import nn as mynn
 import utils.net as net_utils
 import utils.misc as misc_utils
 from core.config import cfg, cfg_from_file, cfg_from_list, assert_and_infer_cfg
-from datasets.roidb import combined_roidb_for_training
+from datasets.roidb import combined_roidb
 from roi_data.loader import RoiDataLoader, MinibatchSampler, BatchSampler, collate_minibatch
 from modeling.model_builder import Generalized_RCNN
 from utils.detectron_weight_helper import load_detectron_weight
 from utils.logging import setup_logging
 from utils.timer import Timer
 from utils.training_stats import TrainingStats
-from utils.logging import log_stats
 
 # Set up logging and load config options
 logger = setup_logging(__name__)
@@ -42,10 +41,13 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 def parse_args():
     """Parse input arguments"""
     parser = argparse.ArgumentParser(description='Train a X-RCNN network')
-
     parser.add_argument(
         '--dataset', dest='dataset', required=True,
         help='Dataset to use')
+    parser.add_argument('--g', dest='group',
+                      help='which group to train',
+                      default=1)
+    parser.add_argument('--seen', dest='seen',default=1, type=int)
     parser.add_argument(
         '--cfg', dest='cfg_file', required=True,
         help='Config file for training (and optionally testing)')
@@ -94,6 +96,11 @@ def parse_args():
         '--start_step',
         help='Starting step count for training epoch. 0-indexed.',
         default=0, type=int)
+    
+    # set training session
+    parser.add_argument('--s', dest='session',
+                      help='training session',
+                      default=1, type=int)
 
     # Resume training: requires same iterations per epoch
     parser.add_argument(
@@ -150,8 +157,11 @@ def main():
         cfg.CUDA = True
     else:
         raise ValueError("Need Cuda device to run !")
-
-    if args.dataset == "coco2017":
+    
+    if args.dataset == "fss_cell":
+        cfg.TRAIN.DATASETS = ('fss_cell',)
+        cfg.MODEL.NUM_CLASSES = 14
+    elif args.dataset == "coco2017":
         cfg.TRAIN.DATASETS = ('coco_2017_train',)
         cfg.MODEL.NUM_CLASSES = 81
     elif args.dataset == "keypoints_coco2017":
@@ -227,8 +237,8 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    roidb, ratio_list, ratio_index = combined_roidb_for_training(
-        cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES)
+    roidb, ratio_list, ratio_index, query = combined_roidb(
+        cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES, True)
     timers['roidb'].toc()
     roidb_size = len(roidb)
     logger.info('{:d} roidb entries'.format(roidb_size))
@@ -243,7 +253,7 @@ def main():
         drop_last=True
     )
     dataset = RoiDataLoader(
-        roidb,
+        roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
         training=True)
     dataloader = torch.utils.data.DataLoader(
@@ -433,9 +443,6 @@ def main():
 
             if (step+1) % CHECKPOINT_PERIOD == 0:
                 save_ckpt(output_dir, args, step, train_size, maskRCNN, optimizer)
-            
-            if (step+1) % args.disp_interval == 0:
-                log_training_stats(training_stats, step, lr)
 
         # ---- Training ends ----
         # Save last checkpoint
@@ -452,10 +459,6 @@ def main():
     finally:
         if args.use_tfboard and not args.no_save:
             tblogger.close()
-
-def log_training_stats(training_stats, global_step, lr):
-    stats = training_stats.GetStats(global_step, lr)
-    log_stats(stats, training_stats.misc_args)
 
 if __name__ == '__main__':
     main()

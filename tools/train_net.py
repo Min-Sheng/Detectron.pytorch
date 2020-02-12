@@ -23,7 +23,7 @@ import nn as mynn
 import utils.net as net_utils
 import utils.misc as misc_utils
 from core.config import cfg, cfg_from_file, cfg_from_list, assert_and_infer_cfg
-from datasets.roidb import combined_roidb_for_training
+from datasets.roidb import combined_roidb
 from modeling.model_builder import Generalized_RCNN
 from roi_data.loader import RoiDataLoader, MinibatchSampler, collate_minibatch
 from utils.detectron_weight_helper import load_detectron_weight
@@ -198,8 +198,8 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    roidb, ratio_list, ratio_index = combined_roidb_for_training(
-        cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES)
+    roidb, ratio_list, ratio_index = combined_roidb(
+        cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES, True)
     timers['roidb'].toc()
     train_size = len(roidb)
     logger.info('{:d} roidb entries'.format(train_size))

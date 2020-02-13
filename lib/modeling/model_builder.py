@@ -177,7 +177,8 @@ class Generalized_RCNN(nn.Module):
             rpn_feat = rpn_feat[-self.num_roi_levels:]
 
         if not self.training:
-            return_dict['blob_conv'] = rpn_feat
+            return_dict['blob_conv'] = blob_conv
+            return_dict['query_conv'] = query_conv
 
         if not cfg.MODEL.RPN_ONLY:
             if cfg.MODEL.SHARE_RES5 and self.training:

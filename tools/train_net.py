@@ -198,7 +198,7 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    roidb, ratio_list, ratio_index = combined_roidb(
+    imdb, roidb, ratio_list, ratio_index = combined_roidb(
         cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES, True)
     timers['roidb'].toc()
     train_size = len(roidb)

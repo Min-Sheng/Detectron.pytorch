@@ -40,20 +40,20 @@ def combined_roidb(dataset_names, proposal_files, training=True):
     which involves caching certain types of metadata for each roidb entry.
     """
     def get_roidb(dataset_name, proposal_file, training):
-        ds = JsonDataset(dataset_name)
-        roidb = ds.get_roidb(
+        imdb = JsonDataset(dataset_name)
+        roidb = imdb.get_roidb(
             gt=True,
             proposal_file=proposal_file,
             crowd_filter_thresh=cfg.TRAIN.CROWD_FILTER_THRESH,
             training=training
         )
         
-        roidb = ds.filter(roidb)
+        roidb = imdb.filter(roidb)
         if cfg.TRAIN.USE_FLIPPED and training:
             logger.info('Appending horizontally-flipped training examples...')
-            extend_with_flipped_entries(roidb, ds)
-        logger.info('Loaded dataset: {:s}'.format(ds.name))
-        return roidb, ds.cat_data, ds.inverse_list
+            extend_with_flipped_entries(roidb, imdb)
+        logger.info('Loaded dataset: {:s}'.format(imdb.name))
+        return imdb, roidb, imdb.cat_data, imdb.inverse_list
 
     if isinstance(dataset_names, six.string_types):
         dataset_names = (dataset_names, )
@@ -63,21 +63,26 @@ def combined_roidb(dataset_names, proposal_files, training=True):
         proposal_files = (None, ) * len(dataset_names)
     assert len(dataset_names) == len(proposal_files)
 
+    imdbs =[]
     roidbs = []
     querys = []
     reserveds = []
     for args in zip(dataset_names, proposal_files):
-        roidb, query, reserved = get_roidb(*args, training)
+        imdb, roidb, query, reserved = get_roidb(*args, training)
+        imdbs.append(imdb)
         roidbs.append(roidb)
         query_filterd = {k: [x for i, x in enumerate(v) if x['area']>300] for k, v in query.items()}
         querys.append(query_filterd)
         reserveds.append(reserved)
 
+    imdb = imdbs[0]
     roidb = roidbs[0]
     query = querys[0]
     reserved = reserveds[0]
 
     if len(roidbs) > 1 and training:
+        for r in imdbs[1:]:
+            imdb.extend(r)
         for r in roidbs[1:]:
             roidb.extend(r)
         for r in range(len(querys[0])):
@@ -102,7 +107,7 @@ def combined_roidb(dataset_names, proposal_files, training=True):
 
     _compute_and_log_stats(roidb)
 
-    return roidb, ratio_list, ratio_index, query
+    return imdb, roidb, ratio_list, ratio_index, query
 
 
 def extend_with_flipped_entries(roidb, dataset):

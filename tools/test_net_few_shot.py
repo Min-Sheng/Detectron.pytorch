@@ -4,6 +4,8 @@ import argparse
 import cv2
 from PIL import Image
 import os
+import yaml
+import datetime
 import pprint
 import sys
 import time
@@ -14,9 +16,15 @@ import numpy as np
 
 import _init_paths  # pylint: disable=unused-import
 from core.config import cfg, merge_cfg_from_file, merge_cfg_from_list, assert_and_infer_cfg
+from datasets import task_evaluation
+from core.test_few_shot import im_detect_all
+from core.test_engine import extend_results
 from datasets.roidb import combined_roidb
 from roi_data.loader import RoiDataLoader, MinibatchSampler, BatchSampler, collate_minibatch
 import utils.logging
+import utils.vis as vis_utils
+from utils.io import save_object
+
 from utils.timer import Timer
 
 from core.test_engine import initialize_model_from_cfg, empty_results
@@ -117,16 +125,16 @@ def main():
     # manually set args.cuda
     args.cuda = True
 
-    timers = defaultdict(Timer)
+    timer_for_ds = defaultdict(Timer)
 
     ### Dataset ###
-    timers['roidb'].tic()
-    roidb, ratio_list, ratio_index, query = combined_roidb(
+    timer_for_ds['roidb'].tic()
+    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(
         cfg.TEST.DATASETS, [], False)
-    timers['roidb'].toc()
+    timer_for_ds['roidb'].toc()
     roidb_size = len(roidb)
     logger.info('{:d} roidb entries'.format(roidb_size))
-    logger.info('Takes %.2f sec(s) to construct roidb', timers['roidb'].average_time)
+    logger.info('Takes %.2f sec(s) to construct roidb', timer_for_ds['roidb'].average_time)
 
     batchSampler = BatchSampler(
         sampler=MinibatchSampler(ratio_list, ratio_index[0], shuffle=False),
@@ -139,8 +147,10 @@ def main():
         training=False)
     
     ### Model ###
-    #model = initialize_model_from_cfg(args, gpu_id=0)
+    model = initialize_model_from_cfg(args, gpu_id=0)
 
+    timer_for_total = defaultdict(Timer)
+    timer_for_total['total_test_time'].tic()
     for avg in range(args.average):
         dataset.query_position = avg
         dataloader = torch.utils.data.DataLoader(
@@ -157,10 +167,79 @@ def main():
         
         # total quantity of testing images
         num_detect = len(ratio_index[0])
-        for i,index in enumerate(ratio_index[0]):
+
+        timers = defaultdict(Timer)
+        for i, index in enumerate(ratio_index[0]):
             input_data = next(dataiterator)
-            #print(i, index, len(input_data))
-            #print(input_data['query'][0].shape)
+            entry = dataset._roidb[dataset.ratio_index[i]]
+            if cfg.TEST.PRECOMPUTED_PROPOSALS:
+                # The roidb may contain ground-truth rois (for example, if the roidb
+                # comes from the training or val split). We only want to evaluate
+                # detection on the *non*-ground-truth rois. We select only the rois
+                # that have the gt_classes field set to 0, which means there's no
+                # ground truth.
+                box_proposals = entry['boxes'][entry['gt_classes'] == 0]
+                if len(box_proposals) == 0:
+                    continue
+            else:
+                # Faster R-CNN type models generate proposals on-the-fly with an
+                # in-network RPN; 1-stage models don't require proposals.
+                box_proposals = None
+            
+            im = cv2.imread(entry['image'])
+            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], box_proposals, timers)
+
+            extend_results(i, all_boxes, cls_boxes_i)
+            if cls_segms_i is not None:
+                extend_results(i, all_segms, cls_segms_i)
+            if cls_keyps_i is not None:
+                extend_results(i, all_keyps, cls_keyps_i)
+            
+            if i % 10 == 0:  # Reduce log file size
+                ave_total_time = np.sum([t.average_time for t in timers.values()])
+                eta_seconds = ave_total_time * (num_images - i - 1)
+                eta = str(datetime.timedelta(seconds=int(eta_seconds)))
+                det_time = (
+                    timers['im_detect_bbox'].average_time +
+                    timers['im_detect_mask'].average_time +
+                    timers['im_detect_keypoints'].average_time
+                )
+                misc_time = (
+                    timers['misc_bbox'].average_time +
+                    timers['misc_mask'].average_time +
+                    timers['misc_keypoints'].average_time
+                )
+                logger.info(
+                    (
+                        'im_detect: range [{:d}, {:d}] of {:d}: '
+                        '{:d}/{:d} {:.3f}s + {:.3f}s (eta: {})'
+                    ).format(
+                        1, num_detect, num_detect, i + 1,
+                        num_detect, det_time, misc_time, eta
+                    )
+                )
+
+            if cfg.VIS:
+                im_name = entry['image']
+                class_name = im_name.split('/')[-4]
+                file_name = im_name.split('/')[-3]
+
+                vis_utils.vis_one_image(
+                    im[:, :, ::-1],
+                    '{:d}_{:s}'.format(i, file_name),
+                    os.path.join(args.output_dir, 'vis'),
+                    cls_boxes_i,
+                    segms = cls_segms_i,
+                    keypoints = cls_keyps_i,
+                    thresh = cfg.VIS_TH,
+                    box_alpha = 0.8,
+                    dataset = imdb,
+                    show_class = False,
+                    class_name = class_name,
+                    query = input_data['query']
+                )
+            
+            """
             if cfg.VIS:
                 
                 im_name = dataset._roidb[dataset.ratio_index[i]]['image']
@@ -191,8 +270,33 @@ def main():
                 if not os.path.exists(im_save_dir):
                     os.makedirs(im_save_dir)
                 im_save_name = os.path.join(im_save_dir, file_name + '_%d_d.png'%(i))
-                cv2.imwrite(im_save_name, im2show)
-                
+                cv2.imwrite(im_save_name, cv2.cvtColor(im2show, cv2.COLOR_RGB2BGR))
+                """
+        cfg_yaml = yaml.dump(cfg)
+        det_name = 'detections.pkl'
+        det_file = os.path.join(args.output_dir, det_name)
+        save_object(
+            dict(
+                all_boxes=all_boxes,
+                all_segms=all_segms,
+                all_keyps=all_keyps,
+                cfg=cfg_yaml
+            ), det_file
+        )
+        logger.info('Wrote detections to: {}'.format(os.path.abspath(det_file)))
+        
+        all_results = task_evaluation.evaluate_all(
+            imdb, all_boxes, all_segms, all_keyps, args.output_dir
+        )
+        task_evaluation.check_expected_results(
+            all_results,
+            atol=cfg.EXPECTED_RESULTS_ATOL,
+            rtol=cfg.EXPECTED_RESULTS_RTOL
+        )
+        task_evaluation.log_copy_paste_friendly_results(all_results)
+    
+    timer_for_total['total_test_time'].toc()
+    logger.info('Total inference time: {:.3f}s'.format(timer_for_total['total_test_time'].average_time))
 
 if __name__ == '__main__':
     main()

@@ -12,10 +12,11 @@ import utils.net as net_utils
 class fast_rcnn_outputs(nn.Module):
     def __init__(self, dim_in):
         super().__init__()
-        self.cls_score = nn.Linear(dim_in, cfg.MODEL.NUM_CLASSES)
         if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:  # bg and fg
+            self.cls_score = nn.Linear(dim_in, 2)
             self.bbox_pred = nn.Linear(dim_in, 4 * 2)
         else:
+            self.cls_score = nn.Linear(dim_in, cfg.MODEL.NUM_CLASSES)
             self.bbox_pred = nn.Linear(dim_in, 4 * cfg.MODEL.NUM_CLASSES)
 
         self._init_weights()
@@ -46,9 +47,61 @@ class fast_rcnn_outputs(nn.Module):
 
         return cls_score, bbox_pred
 
+class fast_rcnn_outputs_co(nn.Module):
+    def __init__(self, dim_in):
+        super().__init__()
+        self.dim_in = dim_in
+        if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:  # bg and fg
+            self.cls_score = nn.Sequential(
+                                    nn.Linear(dim_in * 2, 8),
+                                    nn.Linear(8, 2)
+                                    )
+            self.bbox_pred = nn.Linear(dim_in, 4 * 2)
+        else:
+            self.cls_score = nn.Sequential(
+                                nn.Linear(dim_in * 2, 8),
+                                nn.Linear(8, cfg.MODEL.NUM_CLASSES)
+                                )
+            self.bbox_pred = nn.Linear(dim_in, 4 * cfg.MODEL.NUM_CLASSES)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        init.normal_(self.cls_score[0].weight, std=0.01)
+        init.constant_(self.cls_score[0].bias, 0)
+        init.normal_(self.cls_score[1].weight, std=0.01)
+        init.constant_(self.cls_score[1].bias, 0)
+        init.normal_(self.bbox_pred.weight, std=0.001)
+        init.constant_(self.bbox_pred.bias, 0)
+
+    def detectron_weight_mapping(self):
+        detectron_weight_mapping = {
+            'cls_score.weight': 'cls_score_w',
+            'cls_score.bias': 'cls_score_b',
+            'bbox_pred.weight': 'bbox_pred_w',
+            'bbox_pred.bias': 'bbox_pred_b'
+        }
+        orphan_in_detectron = []
+        return detectron_weight_mapping, orphan_in_detectron
+
+    def forward(self, x, query_feat):
+        if x.dim() == 4:
+            x = x.squeeze(3).squeeze(2)
+        if query_feat.dim() == 4:
+            query_feat = query_feat.squeeze(3).squeeze(2)
+        
+        bbox_pred = self.bbox_pred(x)
+
+        x = x.unsqueeze(0)
+        query_feat = query_feat.unsqueeze(1).repeat(1, x.shape[1] ,1)
+        cls_feat = torch.cat((x, query_feat), dim=2).view(-1, self.dim_in * 2)
+        cls_score = self.cls_score(cls_feat)
+        if not self.training:
+            cls_score = F.softmax(cls_score, dim=1)
+        return cls_score, bbox_pred
 
 def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
-                     bbox_inside_weights, bbox_outside_weights):
+                     bbox_inside_weights, bbox_outside_weights, use_marginloss=True):
     device_id = cls_score.get_device()
     rois_label = Variable(torch.from_numpy(label_int32.astype('int64'))).cuda(device_id)
     loss_cls = F.cross_entropy(cls_score, rois_label)
@@ -63,7 +116,23 @@ def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
     cls_preds = cls_score.max(dim=1)[1].type_as(rois_label)
     accuracy_cls = cls_preds.eq(rois_label).float().mean(dim=0)
 
-    return loss_cls, loss_bbox, accuracy_cls
+    if use_marginloss:
+        batch_size = rois_label.size(0)
+        triplet_loss = torch.nn.MarginRankingLoss(margin = cfg.TRAIN.MARGIN)
+
+        score_label = rois_label.view(batch_size, -1).float()
+        gt_map = torch.abs(score_label.unsqueeze(1)-score_label.unsqueeze(0))
+        score_prob = F.softmax(cls_score, dim=1)[:,1]
+        score_prob = score_prob.view(batch_size, -1)
+        pr_map = torch.abs(score_prob.unsqueeze(1)-score_prob.unsqueeze(0))
+        target = -((gt_map-1)**2) + gt_map
+
+        margin_loss = 3 * triplet_loss(pr_map, gt_map, target)
+        
+        return loss_cls, loss_bbox, accuracy_cls, margin_loss
+
+    else:
+        return loss_cls, loss_bbox, accuracy_cls
 
 
 # ---------------------------------------------------------------------------- #

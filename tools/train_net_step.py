@@ -96,11 +96,6 @@ def parse_args():
         '--start_step',
         help='Starting step count for training epoch. 0-indexed.',
         default=0, type=int)
-    
-    # set training session
-    parser.add_argument('--s', dest='session',
-                      help='training session',
-                      default=1, type=int)
 
     # Resume training: requires same iterations per epoch
     parser.add_argument(
@@ -173,6 +168,10 @@ def main():
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
+
+    cfg.TRAIN.CATEGORIES = [int(args.group)]
+    cfg.TEST.CATEGORIES = [int(args.group)]
+    cfg.SEEN = int(args.seen)
 
     ### Adaptively adjust some configs ###
     original_batch_size = cfg.NUM_GPUS * cfg.TRAIN.IMS_PER_BATCH

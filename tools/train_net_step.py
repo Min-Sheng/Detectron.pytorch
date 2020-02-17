@@ -48,9 +48,9 @@ def parse_args():
                       help='which group to train',
                       default=1)
     parser.add_argument('--seen', dest='seen',default=1, type=int)
-    parser.add_argument(
-        '--cfg', dest='cfg_file', required=True,
-        help='Config file for training (and optionally testing)')
+    #parser.add_argument(
+    #    '--cfg', dest='cfg_file', required=True,
+    #    help='Config file for training (and optionally testing)')
     parser.add_argument(
         '--set', dest='set_cfgs',
         help='Set config keys. Key value sequence seperate by whitespace.'
@@ -165,12 +165,11 @@ def main():
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
 
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
 
-    cfg.TRAIN.CATEGORIES = [int(args.group)]
-    cfg.TEST.CATEGORIES = [int(args.group)]
     cfg.SEEN = int(args.seen)
 
     ### Adaptively adjust some configs ###

@@ -164,8 +164,9 @@ __C.TRAIN.CROWD_FILTER_THRESH = 0 #0.7
 __C.TRAIN.GT_MIN_AREA = -1
 
 # Freeze the backbone architecture during training if set to True
-__C.TRAIN.FREEZE_CONV_BODY = True #False
+__C.TRAIN.FREEZE_CONV_BODY = False
 
+__C.TRAIN.MARGIN = -0.3
 
 # ---------------------------------------------------------------------------- #
 # Data loader options
@@ -627,6 +628,7 @@ __C.FAST_RCNN = AttrDict()
 # The string must match a function this is imported in modeling.model_builder
 # (e.g., 'head_builder.add_roi_2mlp_head' to specify a two hidden layer MLP)
 __C.FAST_RCNN.ROI_BOX_HEAD = ''
+__C.FAST_RCNN.QUERY_BOX_HEAD = ''
 
 # Hidden layer dimension when using an MLP for the RoI box head
 __C.FAST_RCNN.MLP_HEAD_DIM = 1024

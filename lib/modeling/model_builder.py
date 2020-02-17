@@ -2,6 +2,7 @@ from functools import wraps
 import importlib
 import logging
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -108,6 +109,8 @@ class Generalized_RCNN(nn.Module):
         if not cfg.MODEL.RPN_ONLY:
             self.Box_Head = get_func(cfg.FAST_RCNN.ROI_BOX_HEAD)(
                 self.RPN.dim_out, self.roi_feature_transform, self.Conv_Body.spatial_scale)
+            #self.Query_Box_Head = get_func(cfg.FAST_RCNN.QUERY_BOX_HEAD)(
+            #    self.RPN.dim_out)
             self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs(
                 self.Box_Head.dim_out)
 
@@ -185,6 +188,7 @@ class Generalized_RCNN(nn.Module):
                 box_feat, res5_feat = self.Box_Head(act_feat, rpn_ret)
             else:
                 box_feat = self.Box_Head(act_feat, rpn_ret)
+            #query_box_feat = self.Query_Box_Head(act_aim)
             cls_score, bbox_pred = self.Box_Outs(box_feat)
         else:
             # TODO: complete the returns for RPN only situation
@@ -208,13 +212,14 @@ class Generalized_RCNN(nn.Module):
                 return_dict['losses']['loss_rpn_bbox'] = loss_rpn_bbox
 
             # bbox loss
-            loss_cls, loss_bbox, accuracy_cls = fast_rcnn_heads.fast_rcnn_losses(
+            loss_cls, loss_bbox, accuracy_cls, margin_loss = fast_rcnn_heads.fast_rcnn_losses(
                 cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'])
+                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True)
             return_dict['losses']['loss_cls'] = loss_cls
             return_dict['losses']['loss_bbox'] = loss_bbox
             return_dict['metrics']['accuracy_cls'] = accuracy_cls
-
+            return_dict['losses']['margin_loss'] = margin_loss
+            
             if cfg.MODEL.MASK_ON:
                 if getattr(self.Mask_Head, 'SHARE_RES5', False):
                     mask_feat = self.Mask_Head(res5_feat, rpn_ret,

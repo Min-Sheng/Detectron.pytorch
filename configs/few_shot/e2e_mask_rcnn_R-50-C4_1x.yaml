@@ -18,6 +18,7 @@ RPN:
   SIZES: (32, 64, 128, 256, 512)
 FAST_RCNN:
   ROI_BOX_HEAD: ResNet.ResNet_roi_conv5_head
+  QUERY_BOX_HEAD: ResNet.ResNet_conv5_head
   ROI_XFORM_METHOD: RoIAlign
 MRCNN:
   ROI_MASK_HEAD: mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare

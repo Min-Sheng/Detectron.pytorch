@@ -148,9 +148,7 @@ def vis_one_image(
         ax.imshow(im)
     else:
         query = query[0][0][0].permute(1, 2, 0).contiguous().cpu().numpy()
-        query *= [0.229, 0.224, 0.225]
-        query += [0.485, 0.456, 0.406]
-        query *= 255
+        query += cfg.PIXEL_MEANS
         query = query[:,:,::-1]
         query = Image.fromarray(query.astype(np.uint8))
         query_w, query_h = query.size

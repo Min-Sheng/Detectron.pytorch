@@ -263,7 +263,10 @@ def box_results_with_nms_and_limit(scores, boxes):  # NOTE: support single-batch
     dataset (including the background class). `scores[i, j]`` corresponds to the
     box at `boxes[i, j * 4:(j + 1) * 4]`.
     """
-    num_classes = cfg.MODEL.NUM_CLASSES
+    if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:
+        num_classes = 2
+    else:
+        num_classes = cfg.MODEL.NUM_CLASSES
     cls_boxes = [[] for _ in range(num_classes)]
     # Apply threshold on detection probabilities and apply NMS
     # Skip j = 0, because it's the background class
@@ -311,7 +314,10 @@ def box_results_with_nms_and_limit(scores, boxes):  # NOTE: support single-batch
 
 
 def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w):
-    num_classes = cfg.MODEL.NUM_CLASSES
+    if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:
+        num_classes = 2
+    else:
+        num_classes = cfg.MODEL.NUM_CLASSES
     cls_segms = [[] for _ in range(num_classes)]
     mask_ind = 0
     # To work around an issue with cv2.resize (it seems to automatically pad

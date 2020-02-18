@@ -40,10 +40,13 @@ def parse_args():
     parser.add_argument(
         '--dataset',
         help='training dataset')
-    parser.add_argument(
-        '--cfg', dest='cfg_file', required=True,
-        help='optional config file')
-
+    parser.add_argument('--g', dest='group',
+                      help='which group to train',
+                      default=1)
+    parser.add_argument('--seen', dest='seen',default=1, type=int)
+    #parser.add_argument(
+    #    '--cfg', dest='cfg_file', required=True,
+    #    help='optional config file')
     parser.add_argument(
         '--load_ckpt', help='path of checkpoint to load')
     parser.add_argument(
@@ -71,10 +74,7 @@ def parse_args():
         '--vis', dest='vis', help='visualize detections', action='store_true')
     parser.add_argument(
         '--a', dest='average', help='average the top_k candidate samples', default=1, type=int)
-    parser.add_argument(
-        '--seen', dest='seen', help='Reserved: 1 training, 2 testing, 3 both', default=2, type=int)
     return parser.parse_args()
-
 
 def main():
     """Main function"""
@@ -97,14 +97,16 @@ def main():
         logger.info('Automatically set output directory to %s', args.output_dir)
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-
-    cfg.VIS = args.vis
-    cfg.SEEN = args.seen
+    
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
 
     if args.cfg_file is not None:
         merge_cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         merge_cfg_from_list(args.set_cfgs)
+
+    cfg.VIS = args.vis
+    cfg.SEEN = int(args.seen)
 
     if args.dataset == "fss_cell":
         cfg.TEST.DATASETS = ('fss_cell',)

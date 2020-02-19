@@ -183,8 +183,8 @@ class RoiDataLoader(data.Dataset):
 
         # Get image
         path = data['image_path']
-        im = cv2.imread(path)
-        #im = imread(path)
+        #im = cv2.imread(path)
+        im = imread(path)
         
 
         if len(im.shape) == 2:
@@ -231,7 +231,8 @@ class RoiDataLoader(data.Dataset):
             # Group number to class
             if len(self.list)==1:
                 if self.list[0] != 6:
-                    self.list = list(folds['all'] - folds[self.list[0]] - folds[6])
+                    #self.list = list(folds['all'] - folds[self.list[0]] - folds[6])
+                    self.list = [2]
                 else:
                     self.list = list(folds[6])
         

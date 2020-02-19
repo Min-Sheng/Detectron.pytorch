@@ -148,8 +148,11 @@ def vis_one_image(
         ax.imshow(im)
     else:
         query = query[0][0][0].permute(1, 2, 0).contiguous().cpu().numpy()
-        query += cfg.PIXEL_MEANS
-        query = query[:,:,::-1]
+        query *= [0.229, 0.224, 0.225]
+        query += [0.485, 0.456, 0.406]
+        query *= 255
+        #query += cfg.PIXEL_MEANS
+        #query = query[:,:,::-1]
         query = Image.fromarray(query.astype(np.uint8))
         query_w, query_h = query.size
         query_bg = Image.new('RGB', (im.shape[1], im.shape[0]), (255, 255, 255))
@@ -186,7 +189,7 @@ def vis_one_image(
             plt.Rectangle((bbox[0], bbox[1]),
                           bbox[2] - bbox[0],
                           bbox[3] - bbox[1],
-                          fill=False, edgecolor='g',
+                          fill=False, edgecolor='orange',
                           linewidth=0.5, alpha=box_alpha))
 
         if show_class:

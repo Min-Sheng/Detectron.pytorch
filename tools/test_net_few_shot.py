@@ -2,6 +2,7 @@
 
 import argparse
 import cv2
+from scipy.misc import imread
 from PIL import Image
 import os
 import yaml
@@ -188,7 +189,13 @@ def main():
                 # in-network RPN; 1-stage models don't require proposals.
                 box_proposals = None
             
-            im = cv2.imread(entry['image'])
+            #im = cv2.imread(entry['image'])
+            im = imread(entry['image'])
+            
+            if len(im.shape) == 2:
+                im = im[:,:,np.newaxis]
+                im = np.concatenate((im,im,im), axis=2)
+            
             cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], box_proposals, timers)
 
             extend_results(i, all_boxes, cls_boxes_i)
@@ -227,7 +234,7 @@ def main():
                 file_name = im_name.split('/')[-3]
 
                 vis_utils.vis_one_image(
-                    im[:, :, ::-1],
+                    im,
                     '{:d}_{:s}'.format(i, file_name),
                     os.path.join(args.output_dir, 'vis'),
                     cls_boxes_i,

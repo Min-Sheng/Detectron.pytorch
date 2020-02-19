@@ -470,8 +470,7 @@ def evaluate_box_proposals(
     gt_overlaps = np.zeros(0)
     num_pos = 0
     for entry in roidb:
-        gt_inds = np.where(
-            (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
+        gt_inds = np.where(entry['gt_classes'] > 0)[0]
         gt_boxes = entry['boxes'][gt_inds, :]
         gt_areas = entry['seg_areas'][gt_inds]
         valid_gt_inds = np.where(

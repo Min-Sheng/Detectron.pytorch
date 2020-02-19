@@ -1,43 +1,170 @@
-import os
-from collections import OrderedDict
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
+import math
+import copy
+from collections import OrderedDict
+import torch.utils.model_zoo as model_zoo
 from core.config import cfg
-import nn as mynn
 import utils.net as net_utils
-from utils.resnet_weights_helper import convert_state_dict
+
+model_urls = {
+    'resnet50': 'https://s3.amazonaws.com/pytorch/models/resnet50-19c8e357.pth',
+    'resnet101': 'https://s3.amazonaws.com/pytorch/models/resnet101-5d3b4d8f.pth',
+    'resnet152': 'https://s3.amazonaws.com/pytorch/models/resnet152-b121ed2d.pth',
+    }
+
+# ---------------------------------------------------------------------------- #
+# Helper functions
+# ---------------------------------------------------------------------------- #
+
+def weight_mapping(state_dict):
+    state_dict_v2 = copy.deepcopy(state_dict)
+    layer0_mapping = {
+        'conv1.weight': 'res1.conv1.weight',
+        'bn1.weight': 'res1.bn1.weight',
+        'bn1.bias': 'res1.bn1.bias',
+        'bn1.running_mean': 'res1.bn1.running_mean',
+        'bn1.running_var': 'res1.bn1.running_var'
+    }
+    for key in state_dict:
+        if key in layer0_mapping.keys():
+            new_key = layer0_mapping[key]
+            state_dict_v2[new_key] = state_dict_v2.pop(key)
+        if key.find('layer') != -1:
+            layer_id = int(key[key.find('layer') + 5])
+            new_key = key.replace(f'layer{layer_id}', f'res{layer_id+1}')
+            state_dict_v2[new_key] = state_dict_v2.pop(key)
+
+    return state_dict_v2
 
 # ---------------------------------------------------------------------------- #
 # Bits for specific architectures (ResNet50, ResNet101, ...)
 # ---------------------------------------------------------------------------- #
 
-def ResNet50_conv4_body():
-    return ResNet_convX_body((3, 4, 6))
+def ResNet50_conv4_body(pretrained=True, model_path=None):
+    """Constructs a ResNet-50 model.
+    Args:
+      pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """
+    model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
+    model = ResNet_convX_body((3, 4, 6))
+    if pretrained:
+        if model_path:
+            print("Loading pretrained weights from %s" %(model_path))
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
+
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+        else:
+            state_dict = model_zoo.load_url(model_urls['resnet50'])
+            state_dict_v2 = weight_mapping(state_dict)
+        model.load_state_dict(state_dict_v2, strict=False)
+    return model
+
+def ResNet50_conv5_body(pretrained=True, model_path=None):
+    """Constructs a ResNet-50 model.
+      Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """
+    model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
+    model = ResNet_convX_body((3, 4, 6, 3))
+    if pretrained:
+        if model_path:
+            print("Loading pretrained weights from %s" %(model_path))
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
+
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+        else:
+            state_dict = model_zoo.load_url(model_urls['resnet50'])
+            state_dict_v2 = weight_mapping(state_dict)
+        model.load_state_dict(state_dict_v2, strict=False)
+    return model
+
+def ResNet101_conv4_body(pretrained=True, model_path = None):
+    """Constructs a ResNet-101 model.
+    Args:
+      pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """
+    model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
+    model = ResNet_convX_body((3, 4, 23))
+    if pretrained:
+        if model_path:
+            print("Loading pretrained weights from %s" %(model_path))
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
+
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+        else:
+            state_dict = model_zoo.load_url(model_urls['resnet101'])
+            state_dict_v2 = weight_mapping(state_dict)
+        model.load_state_dict(state_dict_v2, strict=False)
+    return model
 
 
-def ResNet50_conv5_body():
-    return ResNet_convX_body((3, 4, 6, 3))
+def ResNet101_conv5_body(pretrained=True, model_path = None):
+    """Constructs a ResNet-101 model.
+    Args:
+      pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """
+    model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
+    model = ResNet_convX_body((3, 4, 23, 3))
+    if pretrained:
+        if model_path:
+            print("Loading pretrained weights from %s" %(model_path))
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
 
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+        else:
+            state_dict = model_zoo.load_url(model_urls['resnet101'])
+            state_dict_v2 = weight_mapping(state_dict)
+        model.load_state_dict(state_dict_v2, strict=False)
+    return model
 
-def ResNet101_conv4_body():
-    return ResNet_convX_body((3, 4, 23))
+def ResNet152_conv5_body(pretrained=True, model_path=None):
+    """Constructs a ResNet-152 model.
+    Args:
+      pretrained (bool): If True, returns a model pre-trained on ImageNet
+    """
+    model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
+    model = ResNet_convX_body((3, 8, 36, 3))
+    if pretrained:
+        if model_path:
+            print("Loading pretrained weights from %s" %(model_path))
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
 
-
-def ResNet101_conv5_body():
-    return ResNet_convX_body((3, 4, 23, 3))
-
-
-def ResNet152_conv5_body():
-    return ResNet_convX_body((3, 8, 36, 3))
-
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+        else:
+            state_dict = model_zoo.load_url(model_urls['resnet152'])
+            state_dict_v2 = weight_mapping(state_dict)
+        model.load_state_dict(state_dict_v2, strict=False)
+    return model
 
 # ---------------------------------------------------------------------------- #
 # Generic ResNet components
 # ---------------------------------------------------------------------------- #
-
 
 class ResNet_convX_body(nn.Module):
     def __init__(self, block_counts):
@@ -48,7 +175,7 @@ class ResNet_convX_body(nn.Module):
 
         self.res1 = globals()[cfg.RESNETS.STEM_FUNC]()
         dim_in = 64
-        dim_bottleneck = cfg.RESNETS.NUM_GROUPS * cfg.RESNETS.WIDTH_PER_GROUP
+        dim_bottleneck = cfg.RESNETS.NUM_GROUPS * cfg.RESNETS.WIDTH_PER_GROUP #64
         self.res2, dim_in = add_stage(dim_in, 256, dim_bottleneck, block_counts[0],
                                       dilation=1, stride_init=1)
         self.res3, dim_in = add_stage(dim_in, 512, dim_bottleneck * 2, block_counts[1],
@@ -65,42 +192,33 @@ class ResNet_convX_body(nn.Module):
 
         self.dim_out = dim_in
 
+        # Initial weights
+        self.apply(self._init_weights)
+
         self._init_modules()
 
+    def _init_weights(self, m):
+        classname = m.__class__.__name__ 
+        if classname.find('Conv') != -1:
+            n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+            m.weight.data.normal_(0, math.sqrt(2. / n))
+        elif classname.find('BatchNorm') != -1:
+            m.weight.data.fill_(1)
+            m.bias.data.zero_()
+    
     def _init_modules(self):
         assert cfg.RESNETS.FREEZE_AT in [0, 2, 3, 4, 5]
         assert cfg.RESNETS.FREEZE_AT <= self.convX
         for i in range(1, cfg.RESNETS.FREEZE_AT + 1):
             freeze_params(getattr(self, 'res%d' % i))
-
-        # Freeze all bn (affine) layers !!!
-        self.apply(lambda m: freeze_params(m) if isinstance(m, mynn.AffineChannel2d) else None)
-
-    def detectron_weight_mapping(self):
-        if cfg.RESNETS.USE_GN:
-            mapping_to_detectron = {
-                'res1.conv1.weight': 'conv1_w',
-                'res1.gn1.weight': 'conv1_gn_s',
-                'res1.gn1.bias': 'conv1_gn_b',
-            }
-            orphan_in_detectron = ['pred_w', 'pred_b']
-        else:
-            mapping_to_detectron = {
-                'res1.conv1.weight': 'conv1_w',
-                'res1.bn1.weight': 'res_conv1_bn_s',
-                'res1.bn1.bias': 'res_conv1_bn_b',
-            }
-            orphan_in_detectron = ['conv1_b', 'fc1000_w', 'fc1000_b']
-
-        for res_id in range(2, self.convX + 1):
-            stage_name = 'res%d' % res_id
-            mapping, orphans = residual_stage_detectron_mapping(
-                getattr(self, stage_name), stage_name,
-                self.block_counts[res_id - 2], res_id)
-            mapping_to_detectron.update(mapping)
-            orphan_in_detectron.extend(orphans)
-
-        return mapping_to_detectron, orphan_in_detectron
+        
+        def set_bn_fix(m):
+            classname = m.__class__.__name__
+            if classname.find('BatchNorm') != -1:
+                for p in m.parameters(): p.requires_grad=False
+        
+        # Freeze all bn layers !!!
+        self.apply(set_bn_fix)
 
     def train(self, mode=True):
         # Override
@@ -108,12 +226,18 @@ class ResNet_convX_body(nn.Module):
 
         for i in range(cfg.RESNETS.FREEZE_AT + 1, self.convX + 1):
             getattr(self, 'res%d' % i).train(mode)
+        
+        def set_bn_eval(m):
+            classname = m.__class__.__name__
+            if classname.find('BatchNorm') != -1:
+                m.eval()
+        # Set all bn layers to eval
+        self.apply(set_bn_eval)
 
     def forward(self, x):
         for i in range(self.convX):
             x = getattr(self, 'res%d' % (i + 1))(x)
         return x
-
 
 class ResNet_roi_conv5_head(nn.Module):
     def __init__(self, dim_in, roi_xform_func, spatial_scale):
@@ -130,14 +254,14 @@ class ResNet_roi_conv5_head(nn.Module):
         self._init_modules()
 
     def _init_modules(self):
-        # Freeze all bn (affine) layers !!!
-        self.apply(lambda m: freeze_params(m) if isinstance(m, mynn.AffineChannel2d) else None)
-
-    def detectron_weight_mapping(self):
-        mapping_to_detectron, orphan_in_detectron = \
-          residual_stage_detectron_mapping(self.res5, 'res5', 3, 5)
-        return mapping_to_detectron, orphan_in_detectron
-
+        # Freeze all bn layers !!!
+        def set_bn_fix(m):
+            classname = m.__class__.__name__
+            if classname.find('BatchNorm') != -1:
+                for p in m.parameters(): p.requires_grad=False
+        # Freeze all bn layers !!!
+        self.apply(set_bn_fix)
+    
     def forward(self, x, rpn_ret):
         x = self.roi_xform(
             x, rpn_ret,
@@ -167,14 +291,14 @@ class ResNet_conv5_head(nn.Module):
         self._init_modules()
 
     def _init_modules(self):
-        # Freeze all bn (affine) layers !!!
-        self.apply(lambda m: freeze_params(m) if isinstance(m, mynn.AffineChannel2d) else None)
-
-    def detectron_weight_mapping(self):
-        mapping_to_detectron, orphan_in_detectron = \
-          residual_stage_detectron_mapping(self.res5, 'res5', 3, 5)
-        return mapping_to_detectron, orphan_in_detectron
-
+        # Freeze all bn layers !!!
+        def set_bn_fix(m):
+            classname = m.__class__.__name__
+            if classname.find('BatchNorm') != -1:
+                for p in m.parameters(): p.requires_grad=False
+        # Freeze all bn layers !!!
+        self.apply(set_bn_fix)
+    
     def forward(self, x):
         res5_feat = self.res5(x)
         x = self.avgpool(res5_feat)
@@ -214,7 +338,6 @@ def add_residual_block(inplanes, outplanes, innerplanes, dilation, stride):
 
     return res_block
 
-
 # ------------------------------------------------------------------------------
 # various downsample shortcuts (may expand and may consider a new helper)
 # ------------------------------------------------------------------------------
@@ -226,7 +349,7 @@ def basic_bn_shortcut(inplanes, outplanes, stride):
                   kernel_size=1,
                   stride=stride,
                   bias=False),
-        mynn.AffineChannel2d(outplanes),
+        nn.BatchNorm2d(outplanes),
     )
 
 
@@ -249,10 +372,10 @@ def basic_gn_shortcut(inplanes, outplanes, stride):
 def basic_bn_stem():
     return nn.Sequential(OrderedDict([
         ('conv1', nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=False)),
-        ('bn1', mynn.AffineChannel2d(64)),
+        ('bn1', nn.BatchNorm2d(64)),
         ('relu', nn.ReLU(inplace=True)),
-        # ('maxpool', nn.MaxPool2d(kernel_size=3, stride=2, padding=0, ceil_mode=True))]))
-        ('maxpool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1))]))
+        ('maxpool', nn.MaxPool2d(kernel_size=3, stride=2, padding=0, ceil_mode=True))]))
+        #('maxpool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1))]))
 
 
 def basic_gn_stem():
@@ -262,7 +385,6 @@ def basic_gn_stem():
                              eps=cfg.GROUP_NORM.EPSILON)),
         ('relu', nn.ReLU(inplace=True)),
         ('maxpool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1))]))
-
 
 # ------------------------------------------------------------------------------
 # various transformations (may expand and may consider a new helper)
@@ -281,16 +403,16 @@ class bottleneck_transformation(nn.Module):
 
         self.conv1 = nn.Conv2d(
             inplanes, innerplanes, kernel_size=1, stride=str1x1, bias=False)
-        self.bn1 = mynn.AffineChannel2d(innerplanes)
+        self.bn1 = nn.BatchNorm2d(innerplanes)
 
         self.conv2 = nn.Conv2d(
             innerplanes, innerplanes, kernel_size=3, stride=str3x3, bias=False,
             padding=1 * dilation, dilation=dilation, groups=group)
-        self.bn2 = mynn.AffineChannel2d(innerplanes)
+        self.bn2 = nn.BatchNorm2d(innerplanes)
 
         self.conv3 = nn.Conv2d(
             innerplanes, outplanes, kernel_size=1, stride=1, bias=False)
-        self.bn3 = mynn.AffineChannel2d(outplanes)
+        self.bn3 = nn.BatchNorm2d(outplanes)
 
         self.downsample = downsample
         self.relu = nn.ReLU(inplace=True)
@@ -369,50 +491,6 @@ class bottleneck_gn_transformation(nn.Module):
         out = self.relu(out)
 
         return out
-
-
-# ---------------------------------------------------------------------------- #
-# Helper functions
-# ---------------------------------------------------------------------------- #
-
-def residual_stage_detectron_mapping(module_ref, module_name, num_blocks, res_id):
-    """Construct weight mapping relation for a residual stage with `num_blocks` of
-    residual blocks given the stage id: `res_id`
-    """
-    if cfg.RESNETS.USE_GN:
-        norm_suffix = '_gn'
-    else:
-        norm_suffix = '_bn'
-    mapping_to_detectron = {}
-    orphan_in_detectron = []
-    for blk_id in range(num_blocks):
-        detectron_prefix = 'res%d_%d' % (res_id, blk_id)
-        my_prefix = '%s.%d' % (module_name, blk_id)
-
-        # residual branch (if downsample is not None)
-        if getattr(module_ref[blk_id], 'downsample'):
-            dtt_bp = detectron_prefix + '_branch1'  # short for "detectron_branch_prefix"
-            mapping_to_detectron[my_prefix
-                                 + '.downsample.0.weight'] = dtt_bp + '_w'
-            orphan_in_detectron.append(dtt_bp + '_b')
-            mapping_to_detectron[my_prefix
-                                 + '.downsample.1.weight'] = dtt_bp + norm_suffix + '_s'
-            mapping_to_detectron[my_prefix
-                                 + '.downsample.1.bias'] = dtt_bp + norm_suffix + '_b'
-
-        # conv branch
-        for i, c in zip([1, 2, 3], ['a', 'b', 'c']):
-            dtt_bp = detectron_prefix + '_branch2' + c
-            mapping_to_detectron[my_prefix
-                                 + '.conv%d.weight' % i] = dtt_bp + '_w'
-            orphan_in_detectron.append(dtt_bp + '_b')
-            mapping_to_detectron[my_prefix
-                                 + '.' + norm_suffix[1:] + '%d.weight' % i] = dtt_bp + norm_suffix + '_s'
-            mapping_to_detectron[my_prefix
-                                 + '.' + norm_suffix[1:] + '%d.bias' % i] = dtt_bp + norm_suffix + '_b'
-
-    return mapping_to_detectron, orphan_in_detectron
-
 
 def freeze_params(m):
     """Freeze all the weights by setting requires_grad to False

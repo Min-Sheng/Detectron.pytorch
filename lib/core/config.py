@@ -73,7 +73,7 @@ __C.TRAIN.FG_THRESH = 0.5
 # Overlap threshold for a ROI to be considered background (class = 0 if
 # overlap in [LO, HI))
 __C.TRAIN.BG_THRESH_HI = 0.5
-__C.TRAIN.BG_THRESH_LO = 0.0
+__C.TRAIN.BG_THRESH_LO = 0.1
 
 # Use horizontally-flipped images during training?
 __C.TRAIN.USE_FLIPPED = True
@@ -228,7 +228,7 @@ __C.TEST.RPN_MIN_SIZE = 8
 
 # Maximum number of detections to return per image (100 is based on the limit
 # established for the COCO dataset)
-__C.TEST.DETECTIONS_PER_IM = 500
+__C.TEST.DETECTIONS_PER_IM = 1000
 
 # Minimum score threshold (assuming scores in a [0, 1] range); a value chosen to
 # balance obtaining high recall with not having too many low precision
@@ -368,9 +368,9 @@ __C.TEST.KPS_AUG.ASPECT_RATIO_H_FLIP = False
 __C.TEST.SOFT_NMS = AttrDict()
 
 # Use soft NMS instead of standard NMS if set to True
-__C.TEST.SOFT_NMS.ENABLED = True #False
+__C.TEST.SOFT_NMS.ENABLED = True
 # See soft NMS paper for definition of these options
-__C.TEST.SOFT_NMS.METHOD = 'gaussian'
+__C.TEST.SOFT_NMS.METHOD = 'linear'
 __C.TEST.SOFT_NMS.SIGMA = 0.5
 # For the soft NMS overlap threshold, we simply use TEST.NMS
 
@@ -598,7 +598,7 @@ __C.SOLVER.BIAS_DOUBLE_LR = True
 __C.SOLVER.BIAS_WEIGHT_DECAY = False
 
 # Warm up to SOLVER.BASE_LR over this number of SGD iterations
-__C.SOLVER.WARM_UP_ITERS = 500
+__C.SOLVER.WARM_UP_ITERS = 0 #500
 
 # Start the warm up from SOLVER.BASE_LR * SOLVER.WARM_UP_FACTOR
 __C.SOLVER.WARM_UP_FACTOR = 1.0 / 3.0

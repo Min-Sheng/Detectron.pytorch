@@ -1,7 +1,7 @@
 from torch import nn
 
 from core.config import cfg
-from datasets import json_dataset
+from datasets import fss_cell
 import roi_data.fast_rcnn
 
 
@@ -32,7 +32,7 @@ class GenerateProposalLabelsOp(nn.Module):
         # This choice should be investigated in the future (it likely does
         # not matter).
         # Note: crowd_thresh=0 will ignore _filter_crowd_proposals
-        json_dataset.add_proposals(roidb, rpn_rois, im_scales, crowd_thresh=0)
+        fss_cell.add_proposals(roidb, rpn_rois, im_scales, crowd_thresh=0)
         blobs = {k: [] for k in output_blob_names}
         roi_data.fast_rcnn.add_fast_rcnn_blobs(blobs, im_scales, roidb)
 

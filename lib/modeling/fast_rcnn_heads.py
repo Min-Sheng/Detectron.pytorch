@@ -84,7 +84,7 @@ class fast_rcnn_outputs_co(nn.Module):
         orphan_in_detectron = []
         return detectron_weight_mapping, orphan_in_detectron
 
-    def forward(self, x, query_feat):
+    def forward(self, x, query_feat, batch_size):
         if x.dim() == 4:
             x = x.squeeze(3).squeeze(2)
         if query_feat.dim() == 4:
@@ -92,8 +92,9 @@ class fast_rcnn_outputs_co(nn.Module):
         
         bbox_pred = self.bbox_pred(x)
 
-        x = x.unsqueeze(0)
-        query_feat = query_feat.unsqueeze(1).repeat(1, x.shape[1] ,1)
+        x = x.view(batch_size, -1, self.dim_in)
+        rois_size = x.size(1)
+        query_feat = query_feat.unsqueeze(1).repeat(1,rois_size,1)
         cls_feat = torch.cat((x, query_feat), dim=2).view(-1, self.dim_in * 2)
         cls_score = self.cls_score(cls_feat)
         if not self.training:
@@ -101,7 +102,7 @@ class fast_rcnn_outputs_co(nn.Module):
         return cls_score, bbox_pred
 
 def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
-                     bbox_inside_weights, bbox_outside_weights, use_marginloss=True):
+                     bbox_inside_weights, bbox_outside_weights, use_marginloss=True, batch_size=None):
     device_id = cls_score.get_device()
     rois_label = Variable(torch.from_numpy(label_int32.astype('int64'))).cuda(device_id)
     loss_cls = F.cross_entropy(cls_score, rois_label)
@@ -117,14 +118,13 @@ def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
     accuracy_cls = cls_preds.eq(rois_label).float().mean(dim=0)
 
     if use_marginloss:
-        batch_size = rois_label.size(0)
         triplet_loss = torch.nn.MarginRankingLoss(margin = cfg.TRAIN.MARGIN)
 
         score_label = rois_label.view(batch_size, -1).float()
-        gt_map = torch.abs(score_label.unsqueeze(1)-score_label.unsqueeze(0))
+        gt_map = torch.abs(score_label.unsqueeze(1)-score_label.unsqueeze(-1))
         score_prob = F.softmax(cls_score, dim=1)[:,1]
         score_prob = score_prob.view(batch_size, -1)
-        pr_map = torch.abs(score_prob.unsqueeze(1)-score_prob.unsqueeze(0))
+        pr_map = torch.abs(score_prob.unsqueeze(1)-score_prob.unsqueeze(-1))
         target = -((gt_map-1)**2) + gt_map
 
         margin_loss = 3 * triplet_loss(pr_map, gt_map, target)

@@ -77,8 +77,8 @@ class Generalized_RCNN(nn.Module):
         super().__init__()
 
         # For cache
-        self.mapping_to_detectron = None
-        self.orphans_in_detectron = None
+        #self.mapping_to_detectron = None
+        #self.orphans_in_detectron = None
 
         # Backbone for feature extraction
         self.Conv_Body = get_func(cfg.MODEL.CONV_BODY)()
@@ -109,9 +109,9 @@ class Generalized_RCNN(nn.Module):
         if not cfg.MODEL.RPN_ONLY:
             self.Box_Head = get_func(cfg.FAST_RCNN.ROI_BOX_HEAD)(
                 self.RPN.dim_out, self.roi_feature_transform, self.Conv_Body.spatial_scale)
-            #self.Query_Box_Head = get_func(cfg.FAST_RCNN.QUERY_BOX_HEAD)(
-            #    self.RPN.dim_out)
-            self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs(
+            self.Query_Box_Head = get_func(cfg.FAST_RCNN.QUERY_BOX_HEAD)(
+                self.RPN.dim_out)
+            self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
                 self.Box_Head.dim_out)
 
         # Mask Branch
@@ -134,7 +134,7 @@ class Generalized_RCNN(nn.Module):
 
     def _init_modules(self):
         if cfg.MODEL.LOAD_IMAGENET_PRETRAINED_WEIGHTS:
-            resnet_utils.load_pretrained_imagenet_weights(self)
+            #resnet_utils.load_pretrained_imagenet_weights(self)
             # Check if shared weights are equaled
             if cfg.MODEL.MASK_ON and getattr(self.Mask_Head, 'SHARE_RES5', False):
                 assert compare_state_dict(self.Mask_Head.res5.state_dict(), self.Box_Head.res5.state_dict())
@@ -154,6 +154,7 @@ class Generalized_RCNN(nn.Module):
 
     def _forward(self, data, query, im_info, roidb=None, **rpn_kwargs):
         im_data = data
+        batch_size = im_data.size(0)
         query = query.permute(1,0,2,3,4)
         if self.training:
             roidb = list(map(lambda x: blob_utils.deserialize(x)[0], roidb))
@@ -188,8 +189,10 @@ class Generalized_RCNN(nn.Module):
                 box_feat, res5_feat = self.Box_Head(act_feat, rpn_ret)
             else:
                 box_feat = self.Box_Head(act_feat, rpn_ret)
-            #query_box_feat = self.Query_Box_Head(act_aim)
-            cls_score, bbox_pred = self.Box_Outs(box_feat)
+            query_box_feat = self.Query_Box_Head(act_aim)
+            cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat, batch_size)
+            #cls_score, bbox_pred = self.Box_Outs(box_feat)
+
         else:
             # TODO: complete the returns for RPN only situation
             pass
@@ -214,7 +217,7 @@ class Generalized_RCNN(nn.Module):
             # bbox loss
             loss_cls, loss_bbox, accuracy_cls, margin_loss = fast_rcnn_heads.fast_rcnn_losses(
                 cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True)
+                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True, batch_size=batch_size)
             return_dict['losses']['loss_cls'] = loss_cls
             return_dict['losses']['loss_bbox'] = loss_bbox
             return_dict['metrics']['accuracy_cls'] = accuracy_cls

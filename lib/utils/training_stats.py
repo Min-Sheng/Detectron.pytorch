@@ -172,7 +172,7 @@ class TrainingStats(object):
             setattr(self, attr_name, [])
         return mean_val
 
-    def LogIterStats(self, cur_iter, lr):
+    def LogIterStats(self, cur_iter, lr, input_data):
         """Log the tracked statistics."""
         if (cur_iter % self.LOG_PERIOD == 0 or
                 cur_iter == cfg.SOLVER.MAX_ITER - 1):
@@ -180,6 +180,7 @@ class TrainingStats(object):
             log_stats(stats, self.misc_args)
             if self.tblogger:
                 self.tb_log_stats(stats, cur_iter)
+                self.tblogger._add_images(cur_iter, input_data)
 
     def tb_log_stats(self, stats, cur_iter):
         """Log the tracked statistics to tensorboard"""
@@ -189,7 +190,7 @@ class TrainingStats(object):
                 if isinstance(v, dict):
                     self.tb_log_stats(v, cur_iter)
                 else:
-                    self.tblogger.add_scalar(k, v, cur_iter)
+                    self.tblogger.writer.add_scalar(k, v, cur_iter)
 
     def GetStats(self, cur_iter, lr):
         eta_seconds = self.iter_timer.average_time * (

@@ -361,9 +361,11 @@ def main():
             pickle.dump(blob, f, pickle.HIGHEST_PROTOCOL)
 
         if args.use_tfboard:
-            from tensorboardX import SummaryWriter
+            #from tensorboardX import SummaryWriter
             # Set the Tensorboard logger
-            tblogger = SummaryWriter(output_dir)
+            #tblogger = SummaryWriter(output_dir)
+            from loggers.logger import Logger
+            tblogger = Logger(output_dir)
 
     ### Training Loop ###
     maskRCNN.train()
@@ -437,7 +439,7 @@ def main():
             optimizer.step()
             training_stats.IterToc()
 
-            training_stats.LogIterStats(step, lr)
+            training_stats.LogIterStats(step, lr, input_data)
 
             if (step+1) % CHECKPOINT_PERIOD == 0:
                 save_ckpt(output_dir, args, step, train_size, maskRCNN, optimizer)

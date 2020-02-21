@@ -46,7 +46,7 @@ def parse_args():
         help='Dataset to use')
     parser.add_argument('--g', dest='group',
                       help='which group to train',
-                      default=1)
+                      default=1, type=int)
     parser.add_argument('--seen', dest='seen',default=1, type=int)
     #parser.add_argument(
     #    '--cfg', dest='cfg_file', required=True,
@@ -170,7 +170,7 @@ def main():
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
 
-    cfg.SEEN = int(args.seen)
+    cfg.SEEN = args.seen
 
     ### Adaptively adjust some configs ###
     original_batch_size = cfg.NUM_GPUS * cfg.TRAIN.IMS_PER_BATCH

@@ -43,7 +43,7 @@ def parse_args():
         help='training dataset')
     parser.add_argument('--g', dest='group',
                       help='which group to train',
-                      default=1)
+                      default=1, type=int)
     parser.add_argument('--seen', dest='seen',default=1, type=int)
     #parser.add_argument(
     #    '--cfg', dest='cfg_file', required=True,
@@ -107,7 +107,7 @@ def main():
         merge_cfg_from_list(args.set_cfgs)
 
     cfg.VIS = args.vis
-    cfg.SEEN = int(args.seen)
+    cfg.SEEN = args.seen
 
     if args.dataset == "fss_cell":
         cfg.TEST.DATASETS = ('fss_cell',)
@@ -172,6 +172,7 @@ def main():
         num_detect = len(ratio_index[0])
 
         timers = defaultdict(Timer)
+        post_fix = 'g%d_seen%d_%d'%(args.group, args.seen, avg)
         for i, index in enumerate(ratio_index[0]):
             input_data = next(dataiterator)
             entry = dataset._roidb[dataset.ratio_index[i]]
@@ -236,7 +237,7 @@ def main():
                 vis_utils.vis_one_image(
                     im,
                     '{:d}_{:s}'.format(i, file_name),
-                    os.path.join(args.output_dir, 'vis'),
+                    os.path.join(args.output_dir, 'vis', post_fix),
                     cls_boxes_i,
                     segms = cls_segms_i,
                     keypoints = cls_keyps_i,
@@ -282,8 +283,8 @@ def main():
                 cv2.imwrite(im_save_name, cv2.cvtColor(im2show, cv2.COLOR_RGB2BGR))
                 """
         cfg_yaml = yaml.dump(cfg)
-        det_name = 'detections.pkl'
-        det_file = os.path.join(args.output_dir, det_name)
+        #det_name = 'detections.pkl'
+        det_file = os.path.join(args.output_dir, 'detections_' + post_fix + '.pkl')
         save_object(
             dict(
                 all_boxes=all_boxes,

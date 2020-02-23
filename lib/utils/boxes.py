@@ -110,6 +110,18 @@ def xyxy_to_xywh(xyxy):
     else:
         raise TypeError('Argument xyxy must be a list, tuple, or numpy array.')
 
+def validate_boxes(boxes, width=0, height=0):
+    """Check that a set of boxes are valid."""
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+    assert (x1 >= 0).all()
+    assert (y1 >= 0).all()
+    assert (x2 >= x1).all()
+    assert (y2 >= y1).all()
+    assert (x2 < width).all()
+    assert (y2 < height).all()
 
 def filter_small_boxes(boxes, min_size):
     """Keep boxes with width and height both greater than min_size."""

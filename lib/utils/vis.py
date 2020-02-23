@@ -39,6 +39,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
+from matplotlib.collections import PatchCollection
+from pycocotools import mask as COCOmask
 
 plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 
@@ -106,7 +108,7 @@ def get_class_string(class_index, score, dataset):
         'id{:d}'.format(class_index)
     return class_text + ' {:0.2f}'.format(score).lstrip('0')
 
-def vis_one_image_gt(im, im_id, im_name, output_dir, dataset, dpi=200, ext='png', class_name=None, save=False):
+def vis_one_image_gt(im, im_id, im_name, output_dir, dataset, dpi=200, ext='png', class_name=None, save=False, draw_bbox=True):
     if save:
         if class_name is not None:
             output_dir = os.path.join(output_dir, class_name)
@@ -122,7 +124,8 @@ def vis_one_image_gt(im, im_id, im_name, output_dir, dataset, dpi=200, ext='png'
     annIds = dataset.COCO.getAnnIds(imgIds=im_id, catIds=dataset.COCO.getCatIds())
     anns = dataset.COCO.loadAnns(annIds)
     buffer = io.BytesIO()
-    dataset.COCO.showAnns(anns)
+    #dataset.COCO.showAnns(anns)
+    myshowAnns(dataset.COCO, anns, draw_bbox=draw_bbox)
     output_name = os.path.basename(im_name) + '.' + ext
     fig.savefig(buffer, dpi=dpi)
     buffer.seek(0)
@@ -133,7 +136,86 @@ def vis_one_image_gt(im, im_id, im_name, output_dir, dataset, dpi=200, ext='png'
     buffer.close()
     return pil_image
 
+def myshowAnns(coco, anns, draw_bbox=False):
+    """
+    Display the specified annotations.
+    :param anns (array of object): annotations to display
+    :return: None
+    """
+    if len(anns) == 0:
+        return 0
+    if 'segmentation' in anns[0] or 'keypoints' in anns[0]:
+        datasetType = 'instances'
+    elif 'caption' in anns[0]:
+        datasetType = 'captions'
+    else:
+        raise Exception('datasetType not supported')
+    if datasetType == 'instances':
+        ax = plt.gca()
+        ax.set_autoscale_on(False)
+        polygons = []
+        bboxes = []
+        color = []
+        bboxes_color = []
+        for ann in anns:
+            c = (np.random.random((1, 3))*0.6+0.4).tolist()[0]
+            if 'segmentation' in ann:
+                if type(ann['segmentation']) == list:
+                    # polygon
+                    for seg in ann['segmentation']:
+                        poly = np.array(seg).reshape((int(len(seg)/2), 2))
+                        polygons.append(Polygon(poly))
+                        color.append(c)
+                else:
+                    # mask
+                    t = coco.imgs[ann['image_id']]
+                    if type(ann['segmentation']['counts']) == list:
+                        rle = COCOmask.frPyObjects([ann['segmentation']], t['height'], t['width'])
+                    else:
+                        rle = [ann['segmentation']]
+                    m = COCOmask.decode(rle)
+                    #img = np.ones( (m.shape[0], m.shape[1], 3) )
+                    color_mask = np.random.random((1, 3)).tolist()[0]
+                    #for i in range(3):
+                    #    img[:,:,i] = color_mask[i]
+                    #ax.imshow(np.dstack( (img, m*0.5) ))
+                    contour, hier = cv2.findContours(
+                        m.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+                    for c in contour:
+                        polygon = Polygon(
+                            c.reshape((-1, 2)),
+                            fill=True, facecolor=color_mask,
+                            edgecolor='w', linewidth=1.2,
+                            alpha=0.4)
+                        ax.add_patch(polygon)
+            if 'keypoints' in ann and type(ann['keypoints']) == list:
+                # turn skeleton into zero-based index
+                sks = np.array(coco.loadCats(ann['category_id'])[0]['skeleton'])-1
+                kp = np.array(ann['keypoints'])
+                x = kp[0::3]
+                y = kp[1::3]
+                v = kp[2::3]
+                for sk in sks:
+                    if np.all(v[sk]>0):
+                        plt.plot(x[sk],y[sk], linewidth=3, color=c)
+                plt.plot(x[v>0], y[v>0],'o',markersize=8, markerfacecolor=c, markeredgecolor='k',markeredgewidth=2)
+                plt.plot(x[v>1], y[v>1],'o',markersize=8, markerfacecolor=c, markeredgecolor=c, markeredgewidth=2)
 
+            if draw_bbox:
+                [bbox_x, bbox_y, bbox_w, bbox_h] = ann['bbox']
+                poly = [[bbox_x, bbox_y], [bbox_x, bbox_y+bbox_h], [bbox_x+bbox_w, bbox_y+bbox_h], [bbox_x+bbox_w, bbox_y]]
+                np_poly = np.array(poly).reshape((4,2))
+                bboxes.append(Polygon(np_poly))
+                #bboxes_color.append(c)
+
+        p = PatchCollection(polygons, facecolor=color, linewidths=0, alpha=0.4)
+        ax.add_collection(p)
+        colorval = "#%02x%02x%02x" % (110, 255, 0)
+        b = PatchCollection(bboxes, facecolor='none', edgecolors=colorval, linewidths=0.5, alpha=0.6)
+        ax.add_collection(b)
+    elif datasetType == 'captions':
+        for ann in anns:
+            print(ann['caption'])
 
 def vis_one_image(
         im, im_name, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,
@@ -153,7 +235,22 @@ def vis_one_image(
             boxes, segms, keypoints)
 
     if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
-        return
+        fig = plt.figure(frameon=False)
+        fig.set_size_inches(im.shape[1] / dpi, im.shape[0] / dpi)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.axis('off')
+        fig.add_axes(ax)
+        ax.imshow(im)
+        buffer = io.BytesIO()
+        output_name = os.path.basename(im_name) + '.' + ext
+        fig.savefig(buffer, dpi=dpi)
+        buffer.seek(0)
+        pil_image = Image.open(buffer).convert("RGB")
+        if save:
+            pil_image.save(os.path.join(output_dir, '{}'.format(output_name)), 'png')
+        plt.close('all')
+        buffer.close()
+        return pil_image
 
     if segms is not None:
         masks = mask_util.decode(segms)
@@ -184,11 +281,12 @@ def vis_one_image(
             continue
         print(dataset.classes[classes[i]], score)
         # show box (off by default, box_alpha=0.0)
+        colorval = "#%02x%02x%02x" % (255, 255, 110)
         ax.add_patch(
             plt.Rectangle((bbox[0], bbox[1]),
                           bbox[2] - bbox[0],
                           bbox[3] - bbox[1],
-                          fill=False, edgecolor='orange',
+                          fill=False, edgecolor=colorval,
                           linewidth=0.5, alpha=box_alpha))
 
         if show_class:
@@ -222,7 +320,7 @@ def vis_one_image(
                     c.reshape((-1, 2)),
                     fill=True, facecolor=color_mask,
                     edgecolor='w', linewidth=1.2,
-                    alpha=0.5)
+                    alpha=0.4)
                 ax.add_patch(polygon)
 
         # show keypoints

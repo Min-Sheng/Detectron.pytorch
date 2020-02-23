@@ -99,7 +99,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     
-    args.cfg_file = "configs/few_shot/e2e_faster_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
 
     if args.cfg_file is not None:
         merge_cfg_from_file(args.cfg_file)
@@ -259,7 +259,7 @@ def main():
                         segms = cls_segms_i,
                         keypoints = cls_keyps_i,
                         thresh = cfg.VIS_TH,
-                        box_alpha = 0.8,
+                        box_alpha = 0.6,
                         dataset = imdb,
                         show_class = False,
                         class_name = class_name

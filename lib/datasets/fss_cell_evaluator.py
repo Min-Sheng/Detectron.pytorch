@@ -84,7 +84,7 @@ def _write_coco_segms_results_file(
 
 def _coco_segms_results_one_category(json_dataset, boxes, segms, cat_id):
     results = []
-    image_ids = json_dataset._image_index
+    image_ids = json_dataset.image_index
     #image_ids = json_dataset.COCO.getImgIds()
     #image_ids.sort()
     assert len(boxes) == len(image_ids)
@@ -114,7 +114,7 @@ def _do_segmentation_eval(json_dataset, res_file, output_dir):
     coco_dt = json_dataset.COCO.loadRes(str(res_file))
     #coco_eval = COCOeval(json_dataset.COCO, coco_dt, 'segm')
     coco_eval = customCOCOeval(json_dataset.COCO, coco_dt, 'segm')
-    coco_eval.params.imgIds = json_dataset._image_index
+    coco_eval.params.imgIds = json_dataset.image_index
     coco_eval.evaluate()
     coco_eval.accumulate()
     #_log_detection_eval_metrics(json_dataset, coco_eval)
@@ -164,7 +164,7 @@ def _write_coco_bbox_results_file(json_dataset, all_boxes, res_file):
 
 def _coco_bbox_results_one_category(json_dataset, boxes, cat_id):
     results = []
-    image_ids = json_dataset._image_index
+    image_ids = json_dataset.image_index
     #image_ids = json_dataset.COCO.getImgIds()
     #image_ids.sort()
     assert len(boxes) == len(image_ids)

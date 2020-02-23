@@ -1,7 +1,7 @@
 """ Training Script """
 
 import argparse
-import distutils.util
+#import distutils.util
 import os
 import sys
 import pickle
@@ -50,9 +50,13 @@ def parse_args():
     parser.add_argument(
         '--dataset', dest='dataset', required=True,
         help='Dataset to use')
-    parser.add_argument(
-        '--cfg', dest='cfg_file', required=True,
-        help='Config file for training (and optionally testing)')
+    parser.add_argument('--g', dest='group',
+                      help='which group to train',
+                      default=1, type=int)
+    parser.add_argument('--seen', dest='seen',default=1, type=int)
+    #parser.add_argument(
+    #    '--cfg', dest='cfg_file', required=True,
+    #    help='Config file for training (and optionally testing)')
     parser.add_argument(
         '--set', dest='set_cfgs',
         help='Set config keys. Key value sequence seperate by whitespace.'
@@ -62,7 +66,7 @@ def parse_args():
     parser.add_argument(
         '--disp_interval',
         help='Display training info every N iterations',
-        default=100, type=int)
+        default=10, type=int)
     parser.add_argument(
         '--no_cuda', dest='cuda', help='Do not use CUDA device', action='store_false')
 
@@ -93,7 +97,7 @@ def parse_args():
         help='Epochs to decay the learning rate on. '
              'Decay happens on the beginning of a epoch. '
              'Epoch is 0-indexed.',
-        default=[4, 5], nargs='+', type=int)
+        default=[10, 20], nargs='+', type=int)
 
     # Epoch
     parser.add_argument(
@@ -107,7 +111,7 @@ def parse_args():
     parser.add_argument(
         '--epochs', dest='num_epochs',
         help='Number of epochs to train',
-        default=6, type=int)
+        default=30, type=int)
 
     # Resume training: requires same iterations per epoch
     parser.add_argument(
@@ -122,7 +126,7 @@ def parse_args():
         '--ckpt_num_per_epoch',
         help='number of checkpoints to save in each epoch. '
              'Not include the one at the end of an epoch.',
-        default=3, type=int)
+        default=1, type=int)
 
     parser.add_argument(
         '--load_ckpt', help='checkpoint path to load')
@@ -151,7 +155,10 @@ def main():
     else:
         raise ValueError("Need Cuda device to run !")
 
-    if args.dataset == "coco2017":
+    if args.dataset == "fss_cell":
+        cfg.TRAIN.DATASETS = ('fss_cell',)
+        cfg.MODEL.NUM_CLASSES = 14
+    elif args.dataset == "coco2017":
         cfg.TRAIN.DATASETS = ('coco_2017_train',)
         cfg.MODEL.NUM_CLASSES = 81
     elif args.dataset == "keypoints_coco2017":
@@ -159,22 +166,29 @@ def main():
         cfg.MODEL.NUM_CLASSES = 2
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
-
+    
+    args.cfg_file = "configs/few_shot/e2e_faster_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
 
+    cfg.SEEN = args.seen
+
     ### Adaptively adjust some configs ###
     original_batch_size = cfg.NUM_GPUS * cfg.TRAIN.IMS_PER_BATCH
+    original_ims_per_batch = cfg.TRAIN.IMS_PER_BATCH
+    original_num_gpus = cfg.NUM_GPUS
     if args.batch_size is None:
         args.batch_size = original_batch_size
     cfg.NUM_GPUS = torch.cuda.device_count()
     assert (args.batch_size % cfg.NUM_GPUS) == 0, \
         'batch_size: %d, NUM_GPUS: %d' % (args.batch_size, cfg.NUM_GPUS)
     cfg.TRAIN.IMS_PER_BATCH = args.batch_size // cfg.NUM_GPUS
-    print('Batch size change from {} (in config file) to {}'.format(
-        original_batch_size, args.batch_size))
-    print('NUM_GPUs: %d, TRAIN.IMS_PER_BATCH: %d' % (cfg.NUM_GPUS, cfg.TRAIN.IMS_PER_BATCH))
+
+    print('Adaptive config changes:')
+    print('    batch_size: %d --> %d' % (original_batch_size, args.batch_size))
+    print('    NUM_GPUS:             %d --> %d' % (original_num_gpus, cfg.NUM_GPUS))
+    print('    IMS_PER_BATCH:        %d --> %d' % (original_ims_per_batch, cfg.TRAIN.IMS_PER_BATCH))
 
     if args.num_workers is not None:
         cfg.DATA_LOADER.NUM_THREADS = args.num_workers
@@ -186,6 +200,15 @@ def main():
     print('Adjust BASE_LR linearly according to batch size change: {} --> {}'.format(
         old_base_lr, cfg.SOLVER.BASE_LR))
 
+    # Scale FPN rpn_proposals collect size (post_nms_topN) in `collect` function
+    # of `collect_and_distribute_fpn_rpn_proposals.py`
+    #
+    # post_nms_topN = int(cfg[cfg_key].RPN_POST_NMS_TOP_N * cfg.FPN.RPN_COLLECT_SCALE + 0.5)
+    if cfg.FPN.FPN_ON and cfg.MODEL.FASTER_RCNN:
+        cfg.FPN.RPN_COLLECT_SCALE = cfg.TRAIN.IMS_PER_BATCH / original_ims_per_batch
+        print('Scale FPN rpn_proposals collect size directly propotional to the change of IMS_PER_BATCH:\n'
+              '    cfg.FPN.RPN_COLLECT_SCALE: {}'.format(cfg.FPN.RPN_COLLECT_SCALE))
+    
     ### Overwrite some solver settings from command line arguments
     if args.optimizer is not None:
         cfg.SOLVER.TYPE = args.optimizer
@@ -198,8 +221,8 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    imdb, roidb, ratio_list, ratio_index = combined_roidb(
-        cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES, True)
+    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(
+        cfg.TRAIN.DATASETS, True)
     timers['roidb'].toc()
     train_size = len(roidb)
     logger.info('{:d} roidb entries'.format(train_size))
@@ -207,7 +230,7 @@ def main():
 
     sampler = MinibatchSampler(ratio_list, ratio_index)
     dataset = RoiDataLoader(
-        roidb,
+        roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
         training=True)
     dataloader = torch.utils.data.DataLoader(
@@ -296,9 +319,11 @@ def main():
             pickle.dump(blob, f, pickle.HIGHEST_PROTOCOL)
 
         if args.use_tfboard:
-            from tensorboardX import SummaryWriter
+            #from tensorboardX import SummaryWriter
             # Set the Tensorboard logger
-            tblogger = SummaryWriter(output_dir)
+            #tblogger = SummaryWriter(output_dir)
+            from loggers.logger import Logger
+            tblogger = Logger(output_dir)
 
     ### Training Loop ###
     maskRCNN.train()
@@ -343,7 +368,7 @@ def main():
                     net_utils.save_ckpt(output_dir, args, maskRCNN, optimizer)
 
                 if args.step % args.disp_interval == 0:
-                    log_training_stats(training_stats, global_step, lr)
+                    log_training_stats(training_stats, global_step, lr, input_data)
 
                 global_step += 1
 
@@ -356,7 +381,7 @@ def main():
         # ---- Training ends ----
         if iters_per_epoch % args.disp_interval != 0:
             # log last stats at the end
-            log_training_stats(training_stats, global_step, lr)
+            log_training_stats(training_stats, global_step, lr, input_data)
 
     except (RuntimeError, KeyboardInterrupt):
         logger.info('Save ckpt on exception ...')
@@ -370,11 +395,12 @@ def main():
             tblogger.close()
 
 
-def log_training_stats(training_stats, global_step, lr):
+def log_training_stats(training_stats, global_step, lr, input_data):
     stats = training_stats.GetStats(global_step, lr)
     log_stats(stats, training_stats.misc_args)
     if training_stats.tblogger:
         training_stats.tb_log_stats(stats, global_step)
+        training_stats.tblogger._add_images(global_step, input_data)
 
 
 if __name__ == '__main__':

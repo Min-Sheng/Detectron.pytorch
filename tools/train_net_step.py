@@ -236,7 +236,7 @@ def main():
     ### Dataset ###
     timers['roidb'].tic()
     imdb, roidb, ratio_list, ratio_index, query = combined_roidb(
-        cfg.TRAIN.DATASETS, cfg.TRAIN.PROPOSAL_FILES, True)
+        cfg.TRAIN.DATASETS, True)
     timers['roidb'].toc()
     roidb_size = len(roidb)
     logger.info('{:d} roidb entries'.format(roidb_size))

@@ -19,20 +19,16 @@ import utils.blob as blob_utils
 
 
 class RoiDataLoader(data.Dataset):
-    def __init__(self, roidb, ratio_list, ratio_index, query, num_classes, training=True):
+    def __init__(self, roidb, ratio_list, ratio_index, query, num_classes, training=True, cat_list=None):
         self._roidb = roidb
         self._query = query
         self._num_classes = num_classes
         self.training = training
-        self.DATA_SIZE = len(self._roidb)
-        self.ratio_list = ratio_list
         self.query_position = 0
-
-        if training:
-            self.ratio_index = ratio_index
-        else:
-            self.cat_list = ratio_index[1]
-            self.ratio_index = ratio_index[0]
+        self.ratio_list = ratio_list
+        self.ratio_index = ratio_index
+        self.cat_list = cat_list
+        self.data_size = len(self.ratio_index)
 
         self.filter()
         self.probability()
@@ -79,28 +75,39 @@ class RoiDataLoader(data.Dataset):
 
         if 'gt_boxes' in blobs: 
             del blobs['gt_boxes']
-        
-        if self._roidb[index]['need_crop']:
-            self.crop_data(blobs, ratio)
-            # Check bounding box
-            entry = blobs['roidb'][0]
-            boxes = entry['boxes']
-            invalid = (boxes[:, 0] == boxes[:, 2]) | (boxes[:, 1] == boxes[:, 3])
-            valid_inds = np.nonzero(~ invalid)[0]
-            if len(valid_inds) < len(boxes):
-                for key in ['boxes', 'gt_classes', 'seg_areas', 'gt_overlaps', 'is_crowd',
-                            'box_to_gt_ind_map', 'gt_keypoints']:
-                    if key in entry:
-                        entry[key] = entry[key][valid_inds]
-                entry['segms'] = [entry['segms'][ind] for ind in valid_inds]
+            
+        if self.training:
+            if self._roidb[index]['need_crop']:
+                self.suffle_crop_data(blobs, ratio)
+                # Check bounding box
+                entry = blobs['roidb'][0]
+                boxes = entry['boxes']
+                invalid = (boxes[:, 0] == boxes[:, 2]) | (boxes[:, 1] == boxes[:, 3])
+                valid_inds = np.nonzero(~ invalid)[0]
+                if len(valid_inds) < len(boxes):
+                    for key in ['boxes', 'gt_classes', 'seg_areas', 'gt_overlaps', 'is_crowd',
+                                'box_to_gt_ind_map', 'gt_keypoints']:
+                        if key in entry:
+                            entry[key] = entry[key][valid_inds]
+                    entry['segms'] = [entry['segms'][ind] for ind in valid_inds]
 
-        blobs['roidb'] = blob_utils.serialize(blobs['roidb'])  # CHECK: maybe we can serialize in collate_fn
+            blobs['roidb'] = blob_utils.serialize(blobs['roidb'])
+            return blobs
+        else:
+            blobs['roidb'] = blob_utils.serialize(blobs['roidb'])
+            choice = self.cat_list[index]
+            blobs['choice'] = choice
+            return blobs
 
-        return blobs
-
-    def crop_data(self, blobs, ratio):
+    def suffle_crop_data(self, blobs, ratio):
         data_height, data_width = map(int, blobs['im_info'][:2])
+        #entry = blobs['roidb'][0]
+        #indices = np.arange(len(entry['boxes']))
+        #np.random.shuffle(indices)
+        #for key in entry.keys():
+        #    entry[key] = entry[key][indices]
         boxes = blobs['roidb'][0]['boxes']
+
         if ratio < 1:  # width << height, crop height
             size_crop = math.ceil(data_width / ratio)  # size after crop
             min_y = math.floor(np.min(boxes[:, 1]))
@@ -206,7 +213,7 @@ class RoiDataLoader(data.Dataset):
         return query
 
     def __len__(self):
-        return self.DATA_SIZE
+        return self.data_size
 
     def filter(self):
 

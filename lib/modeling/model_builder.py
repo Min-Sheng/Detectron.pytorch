@@ -77,8 +77,8 @@ class Generalized_RCNN(nn.Module):
         super().__init__()
 
         # For cache
-        #self.mapping_to_detectron = None
-        #self.orphans_in_detectron = None
+        self.mapping_to_detectron = None
+        self.orphans_in_detectron = None
 
         # Backbone for feature extraction
         self.Conv_Body = get_func(cfg.MODEL.CONV_BODY)()

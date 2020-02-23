@@ -34,19 +34,14 @@ from .fss_cell import JsonDataset
 logger = logging.getLogger(__name__)
 
 
-def combined_roidb(dataset_names, proposal_files, training=True):
+def combined_roidb(dataset_names, training=True):
     """Load and concatenate roidbs for one or more datasets, along with optional
     object proposals. The roidb entries are then prepared for use in training,
     which involves caching certain types of metadata for each roidb entry.
     """
-    def get_roidb(dataset_name, proposal_file, training):
+    def get_roidb(dataset_name, training):
         imdb = JsonDataset(dataset_name)
-        roidb = imdb.get_roidb(
-            gt=True,
-            proposal_file=proposal_file,
-            crowd_filter_thresh=cfg.TRAIN.CROWD_FILTER_THRESH,
-            training=training
-        )
+        roidb = imdb.get_roidb(gt=True)
         
         roidb = imdb.filter(roidb)
         if cfg.TRAIN.USE_FLIPPED and training:
@@ -57,18 +52,13 @@ def combined_roidb(dataset_names, proposal_files, training=True):
 
     if isinstance(dataset_names, six.string_types):
         dataset_names = (dataset_names, )
-    if isinstance(proposal_files, six.string_types):
-        proposal_files = (proposal_files, )
-    if len(proposal_files) == 0:
-        proposal_files = (None, ) * len(dataset_names)
-    assert len(dataset_names) == len(proposal_files)
-
+    
     imdbs =[]
     roidbs = []
     querys = []
     reserveds = []
-    for args in zip(dataset_names, proposal_files):
-        imdb, roidb, query, reserved = get_roidb(*args, training)
+    for dataset_name in dataset_names:
+        imdb, roidb, query, reserved = get_roidb(dataset_name, training)
         imdbs.append(imdb)
         roidbs.append(roidb)
         query_filterd = {k: [x for i, x in enumerate(v) if x['area']>300] for k, v in query.items()}
@@ -90,16 +80,19 @@ def combined_roidb(dataset_names, proposal_files, training=True):
         for r in reserveds[1:]:
             reserved.extend(r)
 
-    if cfg.TRAIN.ASPECT_GROUPING or cfg.TRAIN.ASPECT_CROPPING:
-        if training:
+    if training:
+        if cfg.TRAIN.ASPECT_GROUPING or cfg.TRAIN.ASPECT_CROPPING:
+        
             roidb = filter_for_training(roidb)
             logger.info('Computing image aspect ratios and ordering the ratios...')
             ratio_list, ratio_index = rank_for_training(roidb)
             logger.info('done')
         else:
-            logger.info('Computing image aspect ratios and ordering the ratios...')
-            ratio_list, ratio_index = test_rank_roidb_ratio(roidb, reserved)
-            logger.info('done')
+            ratio_list, ratio_index = None, None
+    else:
+        logger.info('Computing image aspect ratios and ordering the ratios...')
+        ratio_list, ratio_index, cat_list = test_rank_roidb_ratio(roidb, reserved)
+        logger.info('done')
 
     logger.info('Computing bounding-box regression targets...')
     add_bbox_regression_targets(roidb)
@@ -107,8 +100,10 @@ def combined_roidb(dataset_names, proposal_files, training=True):
 
     _compute_and_log_stats(roidb)
 
-    return imdb, roidb, ratio_list, ratio_index, query
-
+    if training:
+        return imdb, roidb, ratio_list, ratio_index, query
+    else:
+        return imdb, roidb, ratio_list, ratio_index, query, cat_list
 
 def extend_with_flipped_entries(roidb, dataset):
     """Flip each entry in the given roidb and return a new roidb that is the
@@ -217,8 +212,8 @@ def rank_for_training(roidb):
 
 def test_rank_roidb_ratio(roidb, reserved):
     # rank roidb based on the ratio between width and height.
-    RATIO_HI = cfg.TRAIN.ASPECT_HI  # largest ratio to preserve.
-    RATIO_LO = cfg.TRAIN.ASPECT_LO  # smallest ratio to preserve.
+    RATIO_HI = cfg.TEST.ASPECT_HI  # largest ratio to preserve.
+    RATIO_LO = cfg.TEST.ASPECT_LO  # smallest ratio to preserve.
     
     need_crop_cnt = 0
 
@@ -232,7 +227,7 @@ def test_rank_roidb_ratio(roidb, reserved):
         height = entry['height']
         ratio = width / float(height)
 
-        if cfg.TRAIN.ASPECT_CROPPING:
+        if cfg.TEST.ASPECT_CROPPING:
             if ratio > RATIO_HI:
                 entry['need_crop'] = True
                 ratio = RATIO_HI
@@ -252,16 +247,24 @@ def test_rank_roidb_ratio(roidb, reserved):
                 ratio_index.append(i)
                 cat_list.append(j)
 
-    if cfg.TRAIN.ASPECT_CROPPING:
+    if cfg.TEST.ASPECT_CROPPING:
         logging.info('Number of entries that need to be cropped: %d. Ratio bound: [%.2f, %.2f]',
                      need_crop_cnt, RATIO_LO, RATIO_HI)
 
     ratio_list = np.array(ratio_list)
     ratio_index = np.array(ratio_index)
     cat_list = np.array(cat_list)
-    ratio_index = np.vstack((ratio_index,cat_list))
 
-    return ratio_list, ratio_index
+    return ratio_list, ratio_index, cat_list
+
+def test_cat_list(roidb, reserved):
+    cat_list = [] # category list reserved
+    for i, entry in enumerate(roidb):
+        for j in np.unique(entry['max_classes']):
+            if j in reserved:
+                cat_list.append(j)
+    cat_list = np.array(cat_list)
+    return cat_list
 
 def add_bbox_regression_targets(roidb):
     """Add information needed to train bounding-box regressors."""

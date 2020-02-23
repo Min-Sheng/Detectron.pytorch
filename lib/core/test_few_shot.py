@@ -47,7 +47,7 @@ import utils.image as image_utils
 import utils.keypoints as keypoint_utils
 
 
-def im_detect_all(model, im, query, box_proposals=None, timers=None):
+def im_detect_all(model, im, query, catgory, box_proposals=None, timers=None):
     """Process the outputs of model for testing
     Args:
       model: the network module
@@ -63,16 +63,16 @@ def im_detect_all(model, im, query, box_proposals=None, timers=None):
         timers = defaultdict(Timer)
 
     timers['im_detect_bbox'].tic()
+    catgory = catgory[0].item()
     scores, boxes, im_scale, blob_conv, query_conv = im_detect_bbox(
         model, im, query, cfg.TEST.SCALE, cfg.TEST.MAX_SIZE, box_proposals)
     timers['im_detect_bbox'].toc()
-
     # score and boxes are from the whole image after score thresholding and nms
     # (they are not separated by class) (numpy.ndarray)
     # cls_boxes boxes and scores are separated by class and in the format used
     # for evaluating results
     timers['misc_bbox'].tic()
-    scores, boxes, cls_boxes = box_results_with_nms_and_limit(scores, boxes)
+    scores, boxes, cls_boxes = box_results_with_nms_and_limit(scores, boxes, catgory)
     timers['misc_bbox'].toc()
 
     if cfg.MODEL.MASK_ON and boxes.shape[0] > 0:
@@ -81,7 +81,7 @@ def im_detect_all(model, im, query, box_proposals=None, timers=None):
         timers['im_detect_mask'].toc()
 
         timers['misc_mask'].tic()
-        cls_segms = segm_results(cls_boxes, masks, boxes, im.shape[0], im.shape[1])
+        cls_segms = segm_results(cls_boxes, masks, boxes, im.shape[0], im.shape[1], catgory)
         timers['misc_mask'].toc()
     else:
         cls_segms = None
@@ -249,7 +249,7 @@ def im_detect_keypoints(model, im_scale, boxes, blob_conv, query_conv):
     return pred_heatmaps
 
 
-def box_results_with_nms_and_limit(scores, boxes):  # NOTE: support single-batch
+def box_results_with_nms_and_limit(scores, boxes, catgory):  # NOTE: support single-batch
     """Returns bounding-box detection results by thresholding on scores and
     applying non-maximum suppression (NMS).
 
@@ -263,61 +263,54 @@ def box_results_with_nms_and_limit(scores, boxes):  # NOTE: support single-batch
     dataset (including the background class). `scores[i, j]`` corresponds to the
     box at `boxes[i, j * 4:(j + 1) * 4]`.
     """
-    if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:
-        num_classes = 2
-    else:
-        num_classes = cfg.MODEL.NUM_CLASSES
+    num_classes = cfg.MODEL.NUM_CLASSES
     cls_boxes = [[] for _ in range(num_classes)]
     # Apply threshold on detection probabilities and apply NMS
     # Skip j = 0, because it's the background class
-    for j in range(1, num_classes):
-        inds = np.where(scores[:, j] > cfg.TEST.SCORE_THRESH)[0]
-        scores_j = scores[inds, j]
-        boxes_j = boxes[inds, j * 4:(j + 1) * 4]
-        dets_j = np.hstack((boxes_j, scores_j[:, np.newaxis])).astype(np.float32, copy=False)
-        if cfg.TEST.SOFT_NMS.ENABLED:
-            nms_dets, _ = box_utils.soft_nms(
-                dets_j,
-                sigma=cfg.TEST.SOFT_NMS.SIGMA,
-                overlap_thresh=cfg.TEST.NMS,
-                score_thresh=0.0001,
-                method=cfg.TEST.SOFT_NMS.METHOD
-            )
-        else:
-            keep = box_utils.nms(dets_j, cfg.TEST.NMS)
-            nms_dets = dets_j[keep, :]
-        # Refine the post-NMS boxes using bounding-box voting
-        if cfg.TEST.BBOX_VOTE.ENABLED:
-            nms_dets = box_utils.box_voting(
-                nms_dets,
-                dets_j,
-                cfg.TEST.BBOX_VOTE.VOTE_TH,
-                scoring_method=cfg.TEST.BBOX_VOTE.SCORING_METHOD
-            )
-        cls_boxes[j] = nms_dets
+    fg_idx = 1
+    inds = np.where(scores[:, fg_idx] > cfg.TEST.SCORE_THRESH)[0]
+    scores_fg = scores[inds, fg_idx]
+    boxes_fg = boxes[inds, fg_idx * 4:(fg_idx + 1) * 4]
+    dets_fg = np.hstack((boxes_fg, scores_fg[:, np.newaxis])).astype(np.float32, copy=False)
+    if cfg.TEST.SOFT_NMS.ENABLED:
+        nms_dets, _ = box_utils.soft_nms(
+            dets_fg,
+            sigma=cfg.TEST.SOFT_NMS.SIGMA,
+            overlap_thresh=cfg.TEST.NMS,
+            score_thresh=0.0001,
+            method=cfg.TEST.SOFT_NMS.METHOD
+        )
+    else:
+        keep = box_utils.nms(dets_fg, cfg.TEST.NMS)
+        nms_dets = dets_fg[keep, :]
+    # Refine the post-NMS boxes using bounding-box voting
+    if cfg.TEST.BBOX_VOTE.ENABLED:
+        nms_dets = box_utils.box_voting(
+            nms_dets,
+            dets_fg,
+            cfg.TEST.BBOX_VOTE.VOTE_TH,
+            scoring_method=cfg.TEST.BBOX_VOTE.SCORING_METHOD
+        )
+    cls_boxes[catgory] = nms_dets
 
     # Limit to max_per_image detections **over all classes**
     if cfg.TEST.DETECTIONS_PER_IM > 0:
-        image_scores = np.hstack(
-            [cls_boxes[j][:, -1] for j in range(1, num_classes)]
-        )
+        image_scores = cls_boxes[catgory][:, -1]
+        
         if len(image_scores) > cfg.TEST.DETECTIONS_PER_IM:
             image_thresh = np.sort(image_scores)[-cfg.TEST.DETECTIONS_PER_IM]
-            for j in range(1, num_classes):
-                keep = np.where(cls_boxes[j][:, -1] >= image_thresh)[0]
-                cls_boxes[j] = cls_boxes[j][keep, :]
 
-    im_results = np.vstack([cls_boxes[j] for j in range(1, num_classes)])
+            keep = np.where(cls_boxes[catgory][:, -1] >= image_thresh)[0]
+            cls_boxes[catgory] = cls_boxes[catgory][keep, :]
+
+    im_results = cls_boxes[catgory]
     boxes = im_results[:, :-1]
     scores = im_results[:, -1]
     return scores, boxes, cls_boxes
 
 
-def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w):
-    if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:
-        num_classes = 2
-    else:
-        num_classes = cfg.MODEL.NUM_CLASSES
+def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w, catgory):
+    num_classes = cfg.MODEL.NUM_CLASSES
     cls_segms = [[] for _ in range(num_classes)]
     mask_ind = 0
     # To work around an issue with cv2.resize (it seems to automatically pad
@@ -332,42 +325,42 @@ def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w):
     padded_mask = np.zeros((M + 2, M + 2), dtype=np.float32)
 
     # skip j = 0, because it's the background class
-    for j in range(1, num_classes):
-        segms = []
-        for _ in range(cls_boxes[j].shape[0]):
-            if cfg.MRCNN.CLS_SPECIFIC_MASK:
-                padded_mask[1:-1, 1:-1] = masks[mask_ind, j, :, :]
-            else:
-                padded_mask[1:-1, 1:-1] = masks[mask_ind, 0, :, :]
+    fg_idx = 1
+    segms = []
+    for _ in range(cls_boxes[catgory].shape[0]):
+        if cfg.MRCNN.CLS_SPECIFIC_MASK:
+            padded_mask[1:-1, 1:-1] = masks[mask_ind, fg_idx, :, :]
+        else:
+            padded_mask[1:-1, 1:-1] = masks[mask_ind, 0, :, :]
 
-            ref_box = ref_boxes[mask_ind, :]
-            w = (ref_box[2] - ref_box[0] + 1)
-            h = (ref_box[3] - ref_box[1] + 1)
-            w = np.maximum(w, 1)
-            h = np.maximum(h, 1)
+        ref_box = ref_boxes[mask_ind, :]
+        w = (ref_box[2] - ref_box[0] + 1)
+        h = (ref_box[3] - ref_box[1] + 1)
+        w = np.maximum(w, 1)
+        h = np.maximum(h, 1)
 
-            mask = cv2.resize(padded_mask, (w, h))
-            mask = np.array(mask > cfg.MRCNN.THRESH_BINARIZE, dtype=np.uint8)
-            im_mask = np.zeros((im_h, im_w), dtype=np.uint8)
+        mask = cv2.resize(padded_mask, (w, h))
+        mask = np.array(mask > cfg.MRCNN.THRESH_BINARIZE, dtype=np.uint8)
+        im_mask = np.zeros((im_h, im_w), dtype=np.uint8)
 
-            x_0 = max(ref_box[0], 0)
-            x_1 = min(ref_box[2] + 1, im_w)
-            y_0 = max(ref_box[1], 0)
-            y_1 = min(ref_box[3] + 1, im_h)
+        x_0 = max(ref_box[0], 0)
+        x_1 = min(ref_box[2] + 1, im_w)
+        y_0 = max(ref_box[1], 0)
+        y_1 = min(ref_box[3] + 1, im_h)
 
-            im_mask[y_0:y_1, x_0:x_1] = mask[
-                (y_0 - ref_box[1]):(y_1 - ref_box[1]), (x_0 - ref_box[0]):(x_1 - ref_box[0])]
+        im_mask[y_0:y_1, x_0:x_1] = mask[
+            (y_0 - ref_box[1]):(y_1 - ref_box[1]), (x_0 - ref_box[0]):(x_1 - ref_box[0])]
 
-            # Get RLE encoding used by the COCO evaluation API
-            rle = mask_util.encode(np.array(im_mask[:, :, np.newaxis], order='F'))[0]
-            # For dumping to json, need to decode the byte string.
-            # https://github.com/cocodataset/cocoapi/issues/70
-            rle['counts'] = rle['counts'].decode('ascii')
-            segms.append(rle)
+        # Get RLE encoding used by the COCO evaluation API
+        rle = mask_util.encode(np.array(im_mask[:, :, np.newaxis], order='F'))[0]
+        # For dumping to json, need to decode the byte string.
+        # https://github.com/cocodataset/cocoapi/issues/70
+        rle['counts'] = rle['counts'].decode('ascii')
+        segms.append(rle)
 
-            mask_ind += 1
+        mask_ind += 1
 
-        cls_segms[j] = segms
+    cls_segms[catgory] = segms
 
     assert mask_ind == masks.shape[0]
     return cls_segms

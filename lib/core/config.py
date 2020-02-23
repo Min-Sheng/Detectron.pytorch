@@ -73,7 +73,7 @@ __C.TRAIN.FG_THRESH = 0.5
 # Overlap threshold for a ROI to be considered background (class = 0 if
 # overlap in [LO, HI))
 __C.TRAIN.BG_THRESH_HI = 0.5
-__C.TRAIN.BG_THRESH_LO = 0.1
+__C.TRAIN.BG_THRESH_LO = 0.0 # Set it to 0 to make all the rois size the same
 
 # Use horizontally-flipped images during training?
 __C.TRAIN.USE_FLIPPED = True
@@ -92,7 +92,7 @@ __C.TRAIN.PROPOSAL_FILES = ()
 # Snapshot (model checkpoint) period
 # Divide by NUM_GPUS to determine actual period (e.g., 20000/8 => 2500 iters)
 # to allow for linear training schedule scaling
-__C.TRAIN.SNAPSHOT_ITERS = 1000 #20000
+__C.TRAIN.SNAPSHOT_ITERS = 10000 #20000
 
 # Normalize the targets (subtract empirical mean, divide by empirical stddev)
 __C.TRAIN.BBOX_NORMALIZE_TARGETS = True
@@ -111,7 +111,7 @@ __C.TRAIN.BBOX_NORMALIZE_STDS = (0.1, 0.1, 0.2, 0.2)
 __C.TRAIN.ASPECT_GROUPING = True
 
 # Crop images that have too small or too large aspect ratio
-__C.TRAIN.ASPECT_CROPPING = False
+__C.TRAIN.ASPECT_CROPPING = True #False
 __C.TRAIN.ASPECT_HI = 2
 __C.TRAIN.ASPECT_LO = 0.5
 
@@ -250,7 +250,10 @@ __C.TEST.FORCE_JSON_DATASET_EVAL = True
 # Not set for 1-stage models and 2-stage models with RPN subnetwork enabled
 __C.TEST.PRECOMPUTED_PROPOSALS = True
 
-
+# Crop images that have too small or too large aspect ratio
+__C.TEST.ASPECT_CROPPING = False
+__C.TEST.ASPECT_HI = 2
+__C.TEST.ASPECT_LO = 0.5
 # ---------------------------------------------------------------------------- #
 # Test-time augmentations for bounding box detection
 # See configs/test_time_aug/e2e_mask_rcnn_R-50-FPN_2x.yaml for an example
@@ -674,7 +677,7 @@ __C.RPN.CLS_ACTIVATION = 'sigmoid'
 
 # RPN anchor sizes given in absolute pixels w.r.t. the scaled network input
 # Note: these options are *not* used by FPN RPN; see FPN.RPN* options
-__C.RPN.SIZES = (16, 32, 64, 128)
+__C.RPN.SIZES = (64, 128, 256, 512)
 
 # Stride of the feature map that RPN is attached
 __C.RPN.STRIDE = 16
@@ -961,7 +964,7 @@ __C.EPS = 1e-14
 __C.ROOT_DIR = osp.abspath(osp.join(osp.dirname(__file__), '..', '..'))
 
 # Output basedir
-__C.OUTPUT_DIR = 'Outputs'
+__C.OUTPUT_DIR = '/work/vincentwu929/Detectron.pytorch/Outputs'
 
 # Name (or path to) the matlab executable
 __C.MATLAB = 'matlab'

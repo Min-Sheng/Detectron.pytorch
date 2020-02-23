@@ -24,7 +24,8 @@ def weight_mapping(state_dict):
         'bn1.weight': 'res1.bn1.weight',
         'bn1.bias': 'res1.bn1.bias',
         'bn1.running_mean': 'res1.bn1.running_mean',
-        'bn1.running_var': 'res1.bn1.running_var'
+        'bn1.running_var': 'res1.bn1.running_var',
+        'bn1.num_batches_tracked': 'res1.bn1.num_batches_tracked'
     }
     for key in state_dict:
         if key in layer0_mapping.keys():
@@ -47,7 +48,7 @@ def ResNet50_conv4_body(pretrained=True, model_path=None):
       pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
-    model = ResNet_convX_body((3, 4, 6))
+    model = ResNet_convX_body((3, 4, 6, 3), 4)
     if pretrained:
         if model_path:
             print("Loading pretrained weights from %s" %(model_path))
@@ -62,7 +63,7 @@ def ResNet50_conv4_body(pretrained=True, model_path=None):
         else:
             state_dict = model_zoo.load_url(model_urls['resnet50'])
             state_dict_v2 = weight_mapping(state_dict)
-        model.load_state_dict(state_dict_v2, strict=False)
+        model.load_state_dict(state_dict_v2)
     return model
 
 def ResNet50_conv5_body(pretrained=True, model_path=None):
@@ -71,7 +72,7 @@ def ResNet50_conv5_body(pretrained=True, model_path=None):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
-    model = ResNet_convX_body((3, 4, 6, 3))
+    model = ResNet_convX_body((3, 4, 6, 3), 5)
     if pretrained:
         if model_path:
             print("Loading pretrained weights from %s" %(model_path))
@@ -86,7 +87,7 @@ def ResNet50_conv5_body(pretrained=True, model_path=None):
         else:
             state_dict = model_zoo.load_url(model_urls['resnet50'])
             state_dict_v2 = weight_mapping(state_dict)
-        model.load_state_dict(state_dict_v2, strict=False)
+        model.load_state_dict(state_dict_v2)
     return model
 
 def ResNet101_conv4_body(pretrained=True, model_path = None):
@@ -95,7 +96,7 @@ def ResNet101_conv4_body(pretrained=True, model_path = None):
       pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
-    model = ResNet_convX_body((3, 4, 23))
+    model = ResNet_convX_body((3, 4, 23, 3), 4)
     if pretrained:
         if model_path:
             print("Loading pretrained weights from %s" %(model_path))
@@ -110,7 +111,7 @@ def ResNet101_conv4_body(pretrained=True, model_path = None):
         else:
             state_dict = model_zoo.load_url(model_urls['resnet101'])
             state_dict_v2 = weight_mapping(state_dict)
-        model.load_state_dict(state_dict_v2, strict=False)
+        model.load_state_dict(state_dict_v2)
     return model
 
 
@@ -120,7 +121,7 @@ def ResNet101_conv5_body(pretrained=True, model_path = None):
       pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
-    model = ResNet_convX_body((3, 4, 23, 3))
+    model = ResNet_convX_body((3, 4, 23, 3), 5)
     if pretrained:
         if model_path:
             print("Loading pretrained weights from %s" %(model_path))
@@ -135,7 +136,7 @@ def ResNet101_conv5_body(pretrained=True, model_path = None):
         else:
             state_dict = model_zoo.load_url(model_urls['resnet101'])
             state_dict_v2 = weight_mapping(state_dict)
-        model.load_state_dict(state_dict_v2, strict=False)
+        model.load_state_dict(state_dict_v2)
     return model
 
 def ResNet152_conv5_body(pretrained=True, model_path=None):
@@ -144,7 +145,7 @@ def ResNet152_conv5_body(pretrained=True, model_path=None):
       pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS if model_path is None else model_path
-    model = ResNet_convX_body((3, 8, 36, 3))
+    model = ResNet_convX_body((3, 8, 36, 3), 5)
     if pretrained:
         if model_path:
             print("Loading pretrained weights from %s" %(model_path))
@@ -159,7 +160,7 @@ def ResNet152_conv5_body(pretrained=True, model_path=None):
         else:
             state_dict = model_zoo.load_url(model_urls['resnet152'])
             state_dict_v2 = weight_mapping(state_dict)
-        model.load_state_dict(state_dict_v2, strict=False)
+        model.load_state_dict(state_dict_v2)
     return model
 
 # ---------------------------------------------------------------------------- #
@@ -167,10 +168,10 @@ def ResNet152_conv5_body(pretrained=True, model_path=None):
 # ---------------------------------------------------------------------------- #
 
 class ResNet_convX_body(nn.Module):
-    def __init__(self, block_counts):
+    def __init__(self, block_counts, convX):
         super().__init__()
         self.block_counts = block_counts
-        self.convX = len(block_counts) + 1
+        self.convX = convX
         self.num_layers = (sum(block_counts) + 3 * (self.convX == 4)) * 3 + 2
 
         self.res1 = globals()[cfg.RESNETS.STEM_FUNC]()
@@ -180,17 +181,19 @@ class ResNet_convX_body(nn.Module):
                                       dilation=1, stride_init=1)
         self.res3, dim_in = add_stage(dim_in, 512, dim_bottleneck * 2, block_counts[1],
                                       dilation=1, stride_init=2)
-        self.res4, dim_in = add_stage(dim_in, 1024, dim_bottleneck * 4, block_counts[2],
+        self.res4, res4_dim_out = add_stage(dim_in, 1024, dim_bottleneck * 4, block_counts[2],
                                       dilation=1, stride_init=2)
-        if len(block_counts) == 4:
-            stride_init = 2 if cfg.RESNETS.RES5_DILATION == 1 else 1
-            self.res5, dim_in = add_stage(dim_in, 2048, dim_bottleneck * 8, block_counts[3],
-                                          cfg.RESNETS.RES5_DILATION, stride_init)
+        stride_init = 2 if cfg.RESNETS.RES5_DILATION == 1 else 1
+        self.res5, res5_dim_out = add_stage(res4_dim_out, 2048, dim_bottleneck * 8, block_counts[3],
+                                        cfg.RESNETS.RES5_DILATION, stride_init)
+        self.avgpool = nn.AvgPool2d(7)
+        self.fc = nn.Linear(res5_dim_out, 1000)
+        if self.convX == 5:
             self.spatial_scale = 1 / 32 * cfg.RESNETS.RES5_DILATION
+            self.dim_out = res5_dim_out
         else:
             self.spatial_scale = 1 / 16  # final feature scale wrt. original image scale
-
-        self.dim_out = dim_in
+            self.dim_out = res4_dim_out
 
         # Initial weights
         self.apply(self._init_weights)
@@ -254,6 +257,17 @@ class ResNet_roi_conv5_head(nn.Module):
         self._init_modules()
 
     def _init_modules(self):
+        model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS
+        if model_path is not None:
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
+
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+            self.load_state_dict(state_dict_v2, strict=False)
         # Freeze all bn layers !!!
         def set_bn_fix(m):
             classname = m.__class__.__name__
@@ -291,6 +305,17 @@ class ResNet_conv5_head(nn.Module):
         self._init_modules()
 
     def _init_modules(self):
+        model_path = cfg.RESNETS.IMAGENET_PRETRAINED_WEIGHTS
+        if model_path is not None:
+            state_dict = torch.load(model_path)
+            state_dict = state_dict['state_dict']
+            state_dict_v2 = copy.deepcopy(state_dict)
+
+            for key in state_dict:
+                pre, post = key.split('module.')
+                state_dict_v2[post] = state_dict_v2.pop(key)
+            state_dict_v2 = weight_mapping(state_dict_v2)
+            self.load_state_dict(state_dict_v2, strict=False)
         # Freeze all bn layers !!!
         def set_bn_fix(m):
             classname = m.__class__.__name__

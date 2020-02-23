@@ -23,6 +23,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import io 
 import cv2
 from PIL import Image
 import numpy as np
@@ -101,26 +102,51 @@ def vis_bbox_opencv(img, bbox, thick=1):
 
 
 def get_class_string(class_index, score, dataset):
-    if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:
-        agostic_classes = ['background', 'foreground']
-        class_text = agostic_classes[class_index] if dataset is not None else \
-            'id{:d}'.format(class_index)
-    else:
-        class_text = dataset.classes[class_index] if dataset is not None else \
-            'id{:d}'.format(class_index)
+    class_text = dataset.classes[class_index] if dataset is not None else \
+        'id{:d}'.format(class_index)
     return class_text + ' {:0.2f}'.format(score).lstrip('0')
+
+def vis_one_image_gt(im, im_id, im_name, output_dir, dataset, dpi=200, ext='png', class_name=None, save=False):
+    if save:
+        if class_name is not None:
+            output_dir = os.path.join(output_dir, class_name)
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+    fig = plt.figure(frameon=False)
+    fig.set_size_inches(im.shape[1] / dpi, im.shape[0] / dpi)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.axis('off')
+    fig.add_axes(ax)
+    ax.imshow(im)
+    annIds = dataset.COCO.getAnnIds(imgIds=im_id, catIds=dataset.COCO.getCatIds())
+    anns = dataset.COCO.loadAnns(annIds)
+    buffer = io.BytesIO()
+    dataset.COCO.showAnns(anns)
+    output_name = os.path.basename(im_name) + '.' + ext
+    fig.savefig(buffer, dpi=dpi)
+    buffer.seek(0)
+    pil_image = Image.open(buffer).convert("RGB")
+    if save:
+        pil_image.save(os.path.join(output_dir, '{}'.format(output_name)), 'png')
+    plt.close('all')
+    buffer.close()
+    return pil_image
+
 
 
 def vis_one_image(
         im, im_name, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,
         kp_thresh=2, dpi=200, box_alpha=0.0, dataset=None, show_class=False,
-        ext='png', class_name=None, query=None):
+        ext='png', class_name=None, save=False):
     """Visual debugging of detections."""
-    if class_name is not None:
-        output_dir = os.path.join(output_dir, class_name)
+    
+    if save:
+        if class_name is not None:
+            output_dir = os.path.join(output_dir, class_name)
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         
     if isinstance(boxes, list):
         boxes, segms, keypoints, classes = convert_from_cls_format(
@@ -139,36 +165,13 @@ def vis_one_image(
     cmap = plt.get_cmap('rainbow')
     colors = [cmap(i) for i in np.linspace(0, 1, len(kp_lines) + 2)]
 
-    if query is None:
-        fig = plt.figure(frameon=False)
-        fig.set_size_inches(im.shape[1] / dpi, im.shape[0] / dpi)
-        ax = plt.Axes(fig, [0., 0., 1., 1.])
-        ax.axis('off')
-        fig.add_axes(ax)
-        ax.imshow(im)
-    else:
-        query = query[0][0][0].permute(1, 2, 0).contiguous().cpu().numpy()
-        query *= [0.229, 0.224, 0.225]
-        query += [0.485, 0.456, 0.406]
-        query *= 255
-        #query += cfg.PIXEL_MEANS
-        #query = query[:,:,::-1]
-        query = Image.fromarray(query.astype(np.uint8))
-        query_w, query_h = query.size
-        query_bg = Image.new('RGB', (im.shape[1], im.shape[0]), (255, 255, 255))
-        bg_w, bg_h = query_bg.size
-        offset = ((bg_w - query_w) // 2, (bg_h - query_h) // 2)
-        query_bg.paste(query, offset)
-        query = np.asarray(query_bg)
-        im2show = np.concatenate((im, query), axis=1)
-
-        fig = plt.figure(frameon=False)
-        fig.set_size_inches(im2show.shape[1] / dpi, im2show.shape[0] / dpi)
-        ax = plt.Axes(fig, [0., 0., 1., 1.])
-        ax.axis('off')
-        fig.add_axes(ax)
-        ax.imshow(im2show)
-
+    fig = plt.figure(frameon=False)
+    fig.set_size_inches(im.shape[1] / dpi, im.shape[0] / dpi)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.axis('off')
+    fig.add_axes(ax)
+    ax.imshow(im)
+    buffer = io.BytesIO()
     # Display in largest to smallest order to reduce occlusion
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     sorted_inds = np.argsort(-areas)
@@ -179,11 +182,7 @@ def vis_one_image(
         score = boxes[i, -1]
         if score < thresh:
             continue
-        if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:
-            agostic_classes = ['background', 'foreground']
-            print(agostic_classes[classes[i]], score)
-        else:
-            print(dataset.classes[classes[i]], score)
+        print(dataset.classes[classes[i]], score)
         # show box (off by default, box_alpha=0.0)
         ax.add_patch(
             plt.Rectangle((bbox[0], bbox[1]),
@@ -275,6 +274,12 @@ def vis_one_image(
                     line, color=colors[len(kp_lines) + 1], linewidth=1.0,
                     alpha=0.7)
 
-        output_name = os.path.basename(im_name) + '.' + ext
-        fig.savefig(os.path.join(output_dir, '{}'.format(output_name)), dpi=dpi)
-        plt.close('all')
+    output_name = os.path.basename(im_name) + '.' + ext
+    fig.savefig(buffer, dpi=dpi)
+    buffer.seek(0)
+    pil_image = Image.open(buffer).convert("RGB")
+    if save:
+        pil_image.save(os.path.join(output_dir, '{}'.format(output_name)), 'png')
+    plt.close('all')
+    buffer.close()
+    return pil_image

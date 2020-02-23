@@ -234,21 +234,57 @@ def main():
                 im_name = entry['image']
                 class_name = im_name.split('/')[-4]
                 file_name = im_name.split('/')[-3]
+                
+                im_target = im.copy()
+                query = input_data['query'][0][0][0].permute(1, 2, 0).contiguous().cpu().numpy()
+                query *= [0.229, 0.224, 0.225]
+                query += [0.485, 0.456, 0.406]
+                query *= 255
+                #query += cfg.PIXEL_MEANS
+                #query = query[:,:,::-1]
+                query = Image.fromarray(query.astype(np.uint8))
+                query_w, query_h = query.size
+                query_bg = Image.new('RGB', (im_target.shape[1], im_target.shape[0]), (255, 255, 255))
+                bg_w, bg_h = query_bg.size
+                offset = ((bg_w - query_w) // 2, (bg_h - query_h) // 2)
+                query_bg.paste(query, offset)
+                query = np.asarray(query_bg)
+                im_pair = np.concatenate((im_target, query), axis=1)
+                
+                im_det = vis_utils.vis_one_image(
+                        im,
+                        '{:d}_det_{:s}'.format(i, file_name),
+                        os.path.join(args.output_dir, 'vis', post_fix),
+                        cls_boxes_i,
+                        segms = cls_segms_i,
+                        keypoints = cls_keyps_i,
+                        thresh = cfg.VIS_TH,
+                        box_alpha = 0.8,
+                        dataset = imdb,
+                        show_class = False,
+                        class_name = class_name
+                    )
+                
+                im_gt = vis_utils.vis_one_image_gt(
+                        im, entry['id'], 
+                        '{:d}_gt_{:s}'.format(i, file_name),
+                        os.path.join(args.output_dir, 'vis', post_fix),
+                        dataset = imdb, 
+                        class_name = class_name)
+                im_det = np.asarray(im_det)
+                im_gt = np.asarray(im_gt)
+                im2draw = np.concatenate((im_gt, im_det), axis=1)
+                im2show = np.concatenate((im_pair, im2draw), axis=0)
 
-                vis_utils.vis_one_image(
-                    im,
-                    '{:d}_{:s}'.format(i, file_name),
-                    os.path.join(args.output_dir, 'vis', post_fix),
-                    cls_boxes_i,
-                    segms = cls_segms_i,
-                    keypoints = cls_keyps_i,
-                    thresh = cfg.VIS_TH,
-                    box_alpha = 0.8,
-                    dataset = imdb,
-                    show_class = False,
-                    class_name = class_name,
-                    query = input_data['query']
-                )
+                im_output_dir = os.path.join(args.output_dir, 'vis', post_fix, class_name)
+
+                if not os.path.exists(im_output_dir):
+                    os.makedirs(im_output_dir)
+                
+                im_save_name = os.path.basename('{:d}_{:s}'.format(i, file_name)) + '.png'
+                cv2.imwrite(os.path.join(im_output_dir, '{}'.format(im_save_name)), im2show)
+                
+
             
             """
             if cfg.VIS:

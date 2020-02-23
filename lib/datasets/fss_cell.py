@@ -68,7 +68,7 @@ class JsonDataset(object):
         # Set up dataset classes
         category_ids = self.COCO.getCatIds()
         cats = self.COCO.loadCats(self.COCO.getCatIds())
-        categories = [c['name'] for c in self.COCO.loadCats(category_ids)]
+        categories = [c['name'] for c in cats]
         self.category_to_id_map = dict(zip(categories, category_ids))
         self.classes = ['__background__'] + categories
         self.num_classes = len(self.classes)
@@ -78,18 +78,9 @@ class JsonDataset(object):
         # class name to cat_id (1~14)
         self._class_to_coco_cat_id = dict(list(zip([c['name'] for c in cats],
                                                 self.COCO.getCatIds())))
-        
-        self.json_category_id_to_contiguous_id = {
-            v: i + 1
-            for i, v in enumerate(self.COCO.getCatIds())
-        }
-        self.contiguous_category_id_to_json_id = {
-            v: k
-            for k, v in self.json_category_id_to_contiguous_id.items()
-        }
         self._init_keypoints()
         
-        self._image_index = self._load_image_set_index()
+        self.image_index = self._load_image_set_index()
 
         self.cat_data = {}
 
@@ -116,13 +107,13 @@ class JsonDataset(object):
         """
         Return the absolute path to image i in the image sequence.
         """
-        return self.image_path_from_index(self._image_index[i])
+        return self.image_path_from_index(self.image_index[i])
     
     def image_id_at(self, i):
         """
         Return the absolute path to image i in the image sequence.
         """
-        return self._image_index[i]
+        return self.image_index[i]
 
     def image_path_from_index(self, index):
         """
@@ -154,30 +145,14 @@ class JsonDataset(object):
             keys += ['gt_keypoints', 'has_visible_keypoints']
         return keys
 
-    def get_roidb(
-            self,
-            gt=False,
-            proposal_file=None,
-            min_proposal_size=2,
-            proposal_limit=-1,
-            crowd_filter_thresh=0,
-            training=True
-        ):
+    def get_roidb(self, gt=False):
         """Return an roidb corresponding to the json dataset. Optionally:
            - include ground truth boxes in the roidb
-           - add proposals specified in a proposals file
-           - filter proposals based on a minimum side length
-           - filter proposals that intersect with crowd regions
         """
-        assert gt is True or crowd_filter_thresh == 0, \
-            'Crowd filter threshold must be 0 if ground-truth annotations ' \
-            'are not included.'
-        image_ids = self.COCO.getImgIds()
-        image_ids.sort()
         if cfg.DEBUG:
-            roidb = copy.deepcopy(self.COCO.loadImgs(image_ids))[:100]
+            roidb = copy.deepcopy(self.COCO.loadImgs(self._load_image_set_index()))[:100]
         else:
-            roidb = copy.deepcopy(self.COCO.loadImgs(image_ids))
+            roidb = copy.deepcopy(self.COCO.loadImgs(self._load_image_set_index()))
 
         for entry in roidb:
             self._prep_roidb_entry(entry)
@@ -204,17 +179,6 @@ class JsonDataset(object):
                     with open(cache_filepath, 'wb') as fp:
                         pickle.dump([roidb, self.cat_data], fp, pickle.HIGHEST_PROTOCOL)
                     logger.info('Cache ground truth roidb to %s', cache_filepath)
-        if proposal_file is not None and training:
-            # Include proposals from a file
-            self.debug_timer.tic()
-            self._add_proposals_from_file(
-                roidb, proposal_file, min_proposal_size, proposal_limit,
-                crowd_filter_thresh
-            )
-            logger.debug(
-                '_add_proposals_from_file took {:.3f}s'.
-                format(self.debug_timer.toc(average=False))
-            )
         _add_class_assignments(roidb)
         return roidb
 
@@ -319,7 +283,7 @@ class JsonDataset(object):
 
         im_has_visible_keypoints = False
         for ix, obj in enumerate(valid_objs):
-            cls = self.json_category_id_to_contiguous_id[obj['category_id']]
+            cls = obj['category_id']
             boxes[ix, :] = obj['clean_bbox']
             gt_classes[ix] = cls
             seg_areas[ix] = obj['area']
@@ -330,6 +294,7 @@ class JsonDataset(object):
                 if np.sum(gt_keypoints[ix, 2, :]) > 0:
                     im_has_visible_keypoints = True
             gt_overlaps[ix, cls] = 1.0
+        box_utils.validate_boxes(boxes, width=width, height=height)
         entry['boxes'] = np.append(entry['boxes'], boxes, axis=0)
         entry['segms'].extend(valid_segms)
         # To match the original implementation:
@@ -382,37 +347,6 @@ class JsonDataset(object):
                     entry['gt_keypoints'], gt_keypoints, axis=0
                 )
                 entry['has_visible_keypoints'] = has_visible_keypoints
-
-    def _add_proposals_from_file(
-        self, roidb, proposal_file, min_proposal_size, top_k, crowd_thresh
-    ):
-        """Add proposals from a proposals file to an roidb."""
-        logger.info('Loading proposals from: {}'.format(proposal_file))
-        with open(proposal_file, 'r') as f:
-            proposals = pickle.load(f)
-        id_field = 'indexes' if 'indexes' in proposals else 'ids'  # compat fix
-        _sort_proposals(proposals, id_field)
-        box_list = []
-        for i, entry in enumerate(roidb):
-            if i % 2500 == 0:
-                logger.info(' {:d}/{:d}'.format(i + 1, len(roidb)))
-            boxes = proposals['boxes'][i]
-            # Sanity check that these boxes are for the correct image id
-            assert entry['id'] == proposals[id_field][i]
-            # Remove duplicate boxes and very small boxes and then take top k
-            boxes = box_utils.clip_boxes_to_image(
-                boxes, entry['height'], entry['width']
-            )
-            keep = box_utils.unique_boxes(boxes)
-            boxes = boxes[keep, :]
-            keep = box_utils.filter_small_boxes(boxes, min_proposal_size)
-            boxes = boxes[keep, :]
-            if top_k > 0:
-                boxes = boxes[:top_k, :]
-            box_list.append(boxes)
-        _merge_proposal_boxes_into_roidb(roidb, box_list)
-        if crowd_thresh > 0:
-            _filter_crowd_proposals(roidb, crowd_thresh)
 
     def _init_keypoints(self):
         """Initialize COCO keypoint information."""
@@ -506,7 +440,7 @@ class JsonDataset(object):
 
         self.inverse_list = self.list
         # Which index need to be remove
-        all_index = list(range(len(self._image_index)))
+        all_index = list(range(len(self.image_index)))
 
         for index, info in enumerate(roidb):
             for cat in info['gt_classes']:
@@ -517,7 +451,7 @@ class JsonDataset(object):
         # Remove index from the end to start
         all_index.reverse()
         for index in all_index:
-            self._image_index.pop(index)
+            self.image_index.pop(index)
             roidb.pop(index)
         return roidb
 
@@ -640,11 +574,3 @@ def _add_class_assignments(roidb):
         # if max overlap > 0, the class must be a fg class (not class 0)
         nonzero_inds = np.where(max_overlaps > 0)[0]
         assert all(max_classes[nonzero_inds] != 0)
-
-
-def _sort_proposals(proposals, id_field):
-    """Sort proposals by the specified id field."""
-    order = np.argsort(proposals[id_field])
-    fields_to_sort = ['boxes', id_field, 'scores']
-    for k in fields_to_sort:
-        proposals[k] = [proposals[k][i] for i in order]

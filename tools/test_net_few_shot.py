@@ -99,7 +99,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     
-    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_faster_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
 
     if args.cfg_file is not None:
         merge_cfg_from_file(args.cfg_file)
@@ -132,22 +132,22 @@ def main():
 
     ### Dataset ###
     timer_for_ds['roidb'].tic()
-    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(
-        cfg.TEST.DATASETS, [], False)
+    imdb, roidb, ratio_list, ratio_index, query, cat_list = combined_roidb(
+        cfg.TEST.DATASETS, False)
     timer_for_ds['roidb'].toc()
     roidb_size = len(roidb)
     logger.info('{:d} roidb entries'.format(roidb_size))
     logger.info('Takes %.2f sec(s) to construct roidb', timer_for_ds['roidb'].average_time)
 
     batchSampler = BatchSampler(
-        sampler=MinibatchSampler(ratio_list, ratio_index[0], shuffle=False),
+        sampler=MinibatchSampler(ratio_list, ratio_index, shuffle=False),
         batch_size=1,
         drop_last=False,
     )
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
-        training=False)
+        training=False, cat_list=cat_list)
     
     ### Model ###
     model = initialize_model_from_cfg(args, gpu_id=0)
@@ -164,17 +164,18 @@ def main():
         )
         dataiterator = iter(dataloader)
 
-        num_images = len(ratio_index[0])
+        num_images = len(ratio_index)
         num_classes = cfg.MODEL.NUM_CLASSES
         all_boxes, all_segms, all_keyps = empty_results(num_classes, num_images)
         
         # total quantity of testing images
-        num_detect = len(ratio_index[0])
+        num_detect = len(ratio_index)
 
         timers = defaultdict(Timer)
         post_fix = 'g%d_seen%d_%d'%(args.group, args.seen, avg)
-        for i, index in enumerate(ratio_index[0]):
+        for i, index in enumerate(ratio_index):
             input_data = next(dataiterator)
+            catgory = input_data['choice']
             entry = dataset._roidb[dataset.ratio_index[i]]
             if cfg.TEST.PRECOMPUTED_PROPOSALS:
                 # The roidb may contain ground-truth rois (for example, if the roidb
@@ -197,7 +198,7 @@ def main():
                 im = im[:,:,np.newaxis]
                 im = np.concatenate((im,im,im), axis=2)
             
-            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], box_proposals, timers)
+            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], catgory, box_proposals, timers)
 
             extend_results(i, all_boxes, cls_boxes_i)
             if cls_segms_i is not None:

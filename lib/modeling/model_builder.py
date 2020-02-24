@@ -109,7 +109,9 @@ class Generalized_RCNN(nn.Module):
         if not cfg.MODEL.RPN_ONLY:
             self.Box_Head = get_func(cfg.FAST_RCNN.ROI_BOX_HEAD)(
                 self.RPN.dim_out, self.roi_feature_transform, self.Conv_Body.spatial_scale)
-            self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
+            #self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
+            #    self.Box_Head.dim_out)
+            self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs(
                 self.Box_Head.dim_out)
 
         # Mask Branch
@@ -165,13 +167,36 @@ class Generalized_RCNN(nn.Module):
         blob_conv = self.Conv_Body(im_data)
 
         query_conv = []
-        for shot in range(len(query)):
-            query_conv.append(self.Conv_Body(query[shot]))
+        shot = len(query)
+        for i in range(shot):
+            query_conv.append(self.Conv_Body(query[i]))
+        
+        def pooling(feats, method='avg', dim = 0):
+            feats = torch.stack(feats)
+            if method == 'avg':
+                feat = torch.mean(feats, dim=dim)
+            elif method == 'max':
+                feat, _ = torch.max(feats, dim=dim)
+            return feat
 
-        query_conv = torch.stack(query_conv)
-        query_conv, _ = torch.max(query_conv, 0)
+        query_conv = list(map(list, zip(*query_conv)))
+        query_conv = [pooling(QC_i, method='avg', dim = 0) for QC_i in query_conv]
 
-        rpn_feat, act_feat, act_aim, c_weight = self.match_net(blob_conv, query_conv)
+        rpn_feat = []
+        act_feat = []
+        act_aim = []
+        c_weight = []
+        for IP, QP in zip(blob_conv, query_conv):
+            _rpn_feat, _act_feat, _act_aim, _c_weight = self.match_net(IP, QP)
+            rpn_feat.append(_rpn_feat)
+            act_feat.append(_act_feat)
+            act_aim.append(_act_aim)
+            c_weight.append(_c_weight)
+        
+        if len(rpn_feat) == 5:
+            act_feat = act_feat[1:]
+            act_aim = act_aim[1:]
+            c_weight = c_weight[1:]
 
         rpn_ret = self.RPN(rpn_feat, im_info, roidb)
 
@@ -190,10 +215,14 @@ class Generalized_RCNN(nn.Module):
 
         if not cfg.MODEL.RPN_ONLY:
             if cfg.MODEL.SHARE_RES5 and self.training:
-                box_feat, query_box_feat, res5_feat, query_res5_feat = self.Box_Head(act_feat, act_aim, rpn_ret)
+                #box_feat, query_box_feat, res5_feat, query_res5_feat = self.Box_Head(act_feat, act_aim, rpn_ret)
+                box_feat, res5_feat = self.Box_Head(act_feat, rpn_ret)
             else:
-                box_feat, query_box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
-            cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat, batch_size)
+                #box_feat, query_box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
+                box_feat= self.Box_Head(act_feat, rpn_ret)
+
+            #cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat, batch_size)
+            cls_score, bbox_pred = self.Box_Outs(box_feat)
             
         else:
             # TODO: complete the returns for RPN only situation
@@ -217,13 +246,16 @@ class Generalized_RCNN(nn.Module):
                 return_dict['losses']['loss_rpn_bbox'] = loss_rpn_bbox
 
             # bbox loss
-            loss_cls, loss_bbox, accuracy_cls, margin_loss = fast_rcnn_heads.fast_rcnn_losses(
+            #loss_cls, loss_bbox, accuracy_cls, margin_loss = fast_rcnn_heads.fast_rcnn_losses(
+            #    cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
+            #    rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True, batch_size=batch_size)
+            loss_cls, loss_bbox, accuracy_cls = fast_rcnn_heads.fast_rcnn_losses(
                 cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True, batch_size=batch_size)
+                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=False, batch_size=batch_size)
             return_dict['losses']['loss_cls'] = loss_cls
             return_dict['losses']['loss_bbox'] = loss_bbox
             return_dict['metrics']['accuracy_cls'] = accuracy_cls
-            return_dict['losses']['margin_loss'] = margin_loss
+            #return_dict['losses']['margin_loss'] = margin_loss
             
             if cfg.MODEL.MASK_ON:
                 if getattr(self.Mask_Head, 'SHARE_RES5', False):

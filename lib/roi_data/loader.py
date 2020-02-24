@@ -19,16 +19,17 @@ import utils.blob as blob_utils
 
 
 class RoiDataLoader(data.Dataset):
-    def __init__(self, roidb, ratio_list, ratio_index, query, num_classes, training=True, cat_list=None):
+    def __init__(self, roidb, ratio_list, ratio_index, query, num_classes, training=True, cat_list=None, shot=5):
+        self.shot =shot
         self._roidb = roidb
         self._query = query
         self._num_classes = num_classes
         self.training = training
-        self.query_position = 0
         self.ratio_list = ratio_list
         self.ratio_index = ratio_index
         self.cat_list = cat_list
         self.data_size = len(self.ratio_index)
+        self.query_position = 0
 
         self.filter()
         self.probability()
@@ -71,7 +72,6 @@ class RoiDataLoader(data.Dataset):
             query = self.load_query(index, single_db[0]['id'])
 
         blobs['query'] = query
-
 
         if 'gt_boxes' in blobs: 
             del blobs['gt_boxes']
@@ -171,7 +171,7 @@ class RoiDataLoader(data.Dataset):
         if self.training:
             # Random choice query catgory image
             all_data = self._query[choice]
-            data = random.choice(all_data)
+            k_shot_data = random.sample(all_data, self.shot)
         else:
             # Take out the purpose category for testing
             catgory = self.cat_list[choice]
@@ -185,30 +185,32 @@ class RoiDataLoader(data.Dataset):
             random.shuffle(l)
 
             # choose the candidate sequence and take out the data information
-            position = l[self.query_position%len(l)]
-            data = all_data[position]
-
-        # Get image
-        path = data['image_path']
-        #im = cv2.imread(path)
-        im = imread(path)
+            position=[l[(self.query_position+i)%len(l)] for i in range(self.shot)]
+            k_shot_data = [all_data[i] for i in position]
+        
+        query = []
+        for data in k_shot_data:
+            # Get image
+            path = data['image_path']
+            #im = cv2.imread(path)
+            im = imread(path)
         
 
-        if len(im.shape) == 2:
-            im = im[:,:,np.newaxis]
-            im = np.concatenate((im,im,im), axis=2)
+            if len(im.shape) == 2:
+                im = im[:,:,np.newaxis]
+                im = np.concatenate((im,im,im), axis=2)
 
-        im = blob_utils.crop(im, data['boxes'], cfg.TRAIN.QUERY_SIZE)
-        # flip the channel, since the original one using cv2
-        # rgb -> bgr
-        # im = im[:,:,::-1]
-        if random.randint(0,99)/100 > 0.5 and self.training:
-            im = im[:, ::-1, :]
+            im = blob_utils.crop(im, data['boxes'], cfg.TRAIN.QUERY_SIZE)
+            # flip the channel, since the original one using cv2
+            # rgb -> bgr
+            # im = im[:,:,::-1]
+            if random.randint(0,99)/100 > 0.5 and self.training:
+                im = im[:, ::-1, :]
 
 
-        im, im_scale = blob_utils.prep_im_for_blob(im,  cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
-        
-        query = blob_utils.im_list_to_blob(im)
+            im, im_scale = blob_utils.prep_im_for_blob(im,  cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
+            
+            query.append(blob_utils.im_list_to_blob(im).squeeze(0))
 
         return query
 

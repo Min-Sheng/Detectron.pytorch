@@ -292,9 +292,11 @@ class ResNet_roi_conv5_head(nn.Module):
         else:
             return x
 
-class ResNet_conv5_head(nn.Module):
-    def __init__(self, dim_in):
+class ResNet_roi_conv5_head_co(nn.Module):
+    def __init__(self, dim_in, roi_xform_func, spatial_scale):
         super().__init__()
+        self.roi_xform = roi_xform_func
+        self.spatial_scale = spatial_scale
 
         dim_bottleneck = cfg.RESNETS.NUM_GROUPS * cfg.RESNETS.WIDTH_PER_GROUP
         stride_init = cfg.FAST_RCNN.ROI_XFORM_RESOLUTION // 7
@@ -324,10 +326,25 @@ class ResNet_conv5_head(nn.Module):
         # Freeze all bn layers !!!
         self.apply(set_bn_fix)
     
-    def forward(self, x):
+    def forward(self, x, y, rpn_ret):
+        x = self.roi_xform(
+            x, rpn_ret,
+            blob_rois='rois',
+            method=cfg.FAST_RCNN.ROI_XFORM_METHOD,
+            resolution=cfg.FAST_RCNN.ROI_XFORM_RESOLUTION,
+            spatial_scale=self.spatial_scale,
+            sampling_ratio=cfg.FAST_RCNN.ROI_XFORM_SAMPLING_RATIO
+        )
         res5_feat = self.res5(x)
         x = self.avgpool(res5_feat)
-        return x
+
+        query_res5_feat = self.res5(y)
+        y = self.avgpool(query_res5_feat)
+
+        if cfg.MODEL.SHARE_RES5 and self.training:
+            return x, y, res5_feat, query_res5_feat
+        else:
+            return x, y
 
 def add_stage(inplanes, outplanes, innerplanes, nblocks, dilation=1, stride_init=2):
     """Make a stage consist of `nblocks` residual blocks.

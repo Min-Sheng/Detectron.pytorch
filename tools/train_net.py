@@ -167,7 +167,7 @@ def main():
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
     
-    args.cfg_file = "configs/few_shot/e2e_faster_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
@@ -352,8 +352,10 @@ def main():
             for args.step, input_data in zip(range(args.start_iter, iters_per_epoch), dataloader):
 
                 for key in input_data:
-                    if key != 'roidb': # roidb is a list of ndarrays with inconsistent length
+                    if key != 'roidb' and key != 'query': # roidb is a list of ndarrays with inconsistent length
                         input_data[key] = list(map(Variable, input_data[key]))
+                    if key == 'query':
+                        input_data[key] = [list(map(Variable, q)) for q in input_data[key]]
 
                 training_stats.IterTic()
                 net_outputs = maskRCNN(**input_data)

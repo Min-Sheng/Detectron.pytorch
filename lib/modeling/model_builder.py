@@ -109,8 +109,6 @@ class Generalized_RCNN(nn.Module):
         if not cfg.MODEL.RPN_ONLY:
             self.Box_Head = get_func(cfg.FAST_RCNN.ROI_BOX_HEAD)(
                 self.RPN.dim_out, self.roi_feature_transform, self.Conv_Body.spatial_scale)
-            self.Query_Box_Head = get_func(cfg.FAST_RCNN.QUERY_BOX_HEAD)(
-                self.RPN.dim_out)
             self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
                 self.Box_Head.dim_out)
 
@@ -155,7 +153,7 @@ class Generalized_RCNN(nn.Module):
     def _forward(self, data, query, im_info, roidb=None, **rpn_kwargs):
         im_data = data
         batch_size = im_data.size(0)
-        query = query.permute(1,0,2,3,4)
+
         if self.training:
             roidb = list(map(lambda x: blob_utils.deserialize(x)[0], roidb))
 
@@ -165,7 +163,13 @@ class Generalized_RCNN(nn.Module):
 
         # feed image data to base model to obtain base feature map
         blob_conv = self.Conv_Body(im_data)
-        query_conv = self.Conv_Body(query[0])
+
+        query_conv = []
+        for shot in range(len(query)):
+            query_conv.append(self.Conv_Body(query[shot]))
+
+        query_conv = torch.stack(query_conv)
+        query_conv, _ = torch.max(query_conv, 0)
 
         rpn_feat, act_feat, act_aim, c_weight = self.match_net(blob_conv, query_conv)
 
@@ -186,13 +190,11 @@ class Generalized_RCNN(nn.Module):
 
         if not cfg.MODEL.RPN_ONLY:
             if cfg.MODEL.SHARE_RES5 and self.training:
-                box_feat, res5_feat = self.Box_Head(act_feat, rpn_ret)
+                box_feat, query_box_feat, res5_feat, query_res5_feat = self.Box_Head(act_feat, act_aim, rpn_ret)
             else:
-                box_feat = self.Box_Head(act_feat, rpn_ret)
-            query_box_feat = self.Query_Box_Head(act_aim)
+                box_feat, query_box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
             cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat, batch_size)
-            #cls_score, bbox_pred = self.Box_Outs(box_feat)
-
+            
         else:
             # TODO: complete the returns for RPN only situation
             pass
@@ -227,8 +229,11 @@ class Generalized_RCNN(nn.Module):
                 if getattr(self.Mask_Head, 'SHARE_RES5', False):
                     mask_feat = self.Mask_Head(res5_feat, rpn_ret,
                                                roi_has_mask_int32=rpn_ret['roi_has_mask_int32'])
+                    #mask_feat = self.Mask_Head(res5_feat, query_res5_feat, rpn_ret,
+                    #                           roi_has_mask_int32=rpn_ret['roi_has_mask_int32'], batch_size=batch_size)
                 else:
                     mask_feat = self.Mask_Head(act_feat, rpn_ret)
+                    #mask_feat = self.Mask_Head(act_feat, act_aim, rpn_ret, batch_size=batch_size)
                 mask_pred = self.Mask_Outs(mask_feat)
                 # return_dict['mask_pred'] = mask_pred
                 # mask loss
@@ -358,6 +363,7 @@ class Generalized_RCNN(nn.Module):
     def mask_net(self, blob_conv, rpn_blob):
         """For inference"""
         mask_feat = self.Mask_Head(blob_conv, rpn_blob)
+        #mask_feat = self.Mask_Head(blob_conv, query_conv, rpn_blob)
         mask_pred = self.Mask_Outs(mask_feat)
         return mask_pred
 

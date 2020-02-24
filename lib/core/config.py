@@ -1012,6 +1012,7 @@ __C.PYTORCH_VERSION_LESS_THAN_040 = False
 _SHARE_RES5_HEADS = set(
     [
         'mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare',
+        'mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare_co'
     ]
 )
 

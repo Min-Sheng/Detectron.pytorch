@@ -56,13 +56,13 @@ class fast_rcnn_outputs_co(nn.Module):
                                     nn.Linear(dim_in * 2, 8),
                                     nn.Linear(8, 2)
                                     )
-            self.bbox_pred = nn.Linear(dim_in, 4 * 2)
+            self.bbox_pred = nn.Linear(dim_in * 2, 4 * 2)
         else:
             self.cls_score = nn.Sequential(
                                 nn.Linear(dim_in * 2, 8),
                                 nn.Linear(8, cfg.MODEL.NUM_CLASSES)
                                 )
-            self.bbox_pred = nn.Linear(dim_in, 4 * cfg.MODEL.NUM_CLASSES)
+            self.bbox_pred = nn.Linear(dim_in * 2, 4 * cfg.MODEL.NUM_CLASSES)
 
         self._init_weights()
 
@@ -90,8 +90,6 @@ class fast_rcnn_outputs_co(nn.Module):
         if query_feat.dim() == 4:
             query_feat = query_feat.squeeze(3).squeeze(2)
         
-        bbox_pred = self.bbox_pred(x)
-
         x = x.view(batch_size, -1, self.dim_in)
         rois_size = x.size(1)
         query_feat = query_feat.unsqueeze(1).repeat(1,rois_size,1)
@@ -99,6 +97,7 @@ class fast_rcnn_outputs_co(nn.Module):
         cls_score = self.cls_score(cls_feat)
         if not self.training:
             cls_score = F.softmax(cls_score, dim=1)
+        bbox_pred = self.bbox_pred(cls_feat)
         return cls_score, bbox_pred
 
 def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,

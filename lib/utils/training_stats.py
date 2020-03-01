@@ -82,6 +82,18 @@ class TrainingStats(object):
         for k, loss in model_out['losses'].items():
             assert loss.shape[0] == cfg.NUM_GPUS
             loss = loss.mean(dim=0, keepdim=True)
+            if cfg.FPN.FPN_ON:
+                if k.startswith('loss_rpn_cls_'):
+                    loss *= 2.0
+                elif k.startswith('loss_rpn_bbox_'):
+                    loss *= 1.0
+                elif k == 'loss_cls':
+                    loss *= 2.0
+                elif k == 'loss_bbox':
+                    loss *= 1.0
+                elif k == 'loss_mask':
+                    loss *= 3.0
+                
             total_loss += loss
             loss_data = loss.data[0]
             model_out['losses'][k] = loss

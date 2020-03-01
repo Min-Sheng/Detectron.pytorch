@@ -196,8 +196,24 @@ def im_detect_mask(model, im_scale, boxes, blob_conv, query_conv):
     if cfg.FPN.MULTILEVEL_ROIS:
         _add_multilevel_rois_for_test(inputs, 'mask_rois')
 
-    rpn_feat, act_feat, act_aim, c_weight = model.module.match_net(blob_conv, query_conv)
-    pred_masks = model.module.mask_net(act_feat, inputs)
+        rpn_feat = []
+        act_feat = []
+        act_aim = []
+        c_weight = []
+        
+        for IP, QP in zip(blob_conv, query_conv):
+            _rpn_feat, _act_feat, _act_aim, _c_weight = model.module.match_net(IP, QP)
+            rpn_feat.append(_rpn_feat)
+            act_feat.append(_act_feat)
+            act_aim.append(_act_aim)
+            c_weight.append(_c_weight)
+        if len(rpn_feat) == 5:
+            act_feat = act_feat[1:]
+            act_aim = act_aim[1:]
+            c_weight = c_weight[1:]
+    else:
+        rpn_feat, act_feat, act_aim, c_weight = model.module.match_net(blob_conv, query_conv)
+    pred_masks = model.module.mask_net(act_feat, act_aim, inputs)
     pred_masks = pred_masks.data.cpu().numpy().squeeze()
 
     if cfg.MRCNN.CLS_SPECIFIC_MASK:

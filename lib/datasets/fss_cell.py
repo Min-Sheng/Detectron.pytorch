@@ -409,12 +409,11 @@ class JsonDataset(object):
 
         folds = {
             'all': set(range(1, 15)),
-            1: set(range(1, 13)) - set(range(1, 3)),
-            2: set(range(1, 13)) - set(range(3, 6)),
-            3: set(range(1, 13)) - set(range(6, 9)),
-            4: set(range(1, 13)) - set(range(9, 11)),
-            5: set(range(1, 13)) - set(range(11, 13)),
-            6: set(range(13, 15))
+            1: set(range(1, 15)) - set(range(1, 3)),
+            2: set(range(1, 15)) - set(range(3, 6)),
+            3: set(range(1, 15)) - set(range(6, 9)),
+            4: set(range(1, 15)) - set(range(9, 11)),
+            5: set(range(1, 15)) - set(range(11, 15)),
         }
 
         if cfg.SEEN==1:
@@ -427,16 +426,13 @@ class JsonDataset(object):
             self.list = cfg.TEST.CATEGORIES
             # Group number to class
             if len(self.list)==1:
-                if self.list[0] != 6:
-                    self.list = list(folds['all'] - folds[self.list[0]] - folds[6])
-                else:
-                    self.list = list(folds[6])
+                self.list = list(folds['all'] - folds[self.list[0]])
         
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
             # Group number to class
             if len(self.list)==2:
-                self.list =list(folds[self.list['all']] - folds[6])
+                self.list =list(folds[self.list['all']])
 
         self.inverse_list = self.list
         # Which index need to be remove

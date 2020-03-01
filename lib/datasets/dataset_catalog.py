@@ -38,11 +38,17 @@ RAW_DIR = 'raw_dir'
 
 # Available datasets
 DATASETS = {
-    'fss_cell':{
+    'fss_cell_train_val':{
         IM_DIR:
             _DATA_DIR + '/fss_cell',
         ANN_FN:
-            _DATA_DIR + '/fss_cell/instances_fss_cell.json'
+            _DATA_DIR + '/fss_cell/instances_fss_cell_train_val.json'
+    },
+    'fss_cell_test':{
+        IM_DIR:
+            _DATA_DIR + '/fss_cell',
+        ANN_FN:
+            _DATA_DIR + '/fss_cell/instances_fss_cell_test.json'
     },
     'cityscapes_fine_instanceonly_seg_train': {
         IM_DIR:

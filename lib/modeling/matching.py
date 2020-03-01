@@ -19,7 +19,7 @@ class match_block(nn.Module):
 
         conv_nd = nn.Conv2d
         max_pool_layer = nn.MaxPool2d(kernel_size=(2, 2))
-        bn = nn.BatchNorm2d
+        #bn = nn.BatchNorm2d
 
         self.g = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
                          kernel_size=1, stride=1, padding=0)
@@ -27,18 +27,18 @@ class match_block(nn.Module):
         self.W = nn.Sequential(
             conv_nd(in_channels=self.inter_channels, out_channels=self.in_channels,
                     kernel_size=1, stride=1, padding=0),
-            bn(self.in_channels)
+            #bn(self.in_channels)
         )
-        nn.init.constant_(self.W[1].weight, 0)
-        nn.init.constant_(self.W[1].bias, 0)
+        #nn.init.constant_(self.W[1].weight, 0)
+        #nn.init.constant_(self.W[1].bias, 0)
 
         self.Q = nn.Sequential(
             conv_nd(in_channels=self.inter_channels, out_channels=self.in_channels,
                     kernel_size=1, stride=1, padding=0),
-            bn(self.in_channels)
+            #bn(self.in_channels)
         )
-        nn.init.constant_(self.Q[1].weight, 0)
-        nn.init.constant_(self.Q[1].bias, 0)
+        #nn.init.constant_(self.Q[1].weight, 0)
+        #nn.init.constant_(self.Q[1].bias, 0)
 
         self.theta = conv_nd(in_channels=self.in_channels, out_channels=self.inter_channels,
                              kernel_size=1, stride=1, padding=0)

@@ -2,6 +2,7 @@
 
 import argparse
 import cv2
+import json
 from scipy.misc import imread
 from PIL import Image
 import os
@@ -10,9 +11,11 @@ import datetime
 import pprint
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 import torch
+from torchvision.utils import make_grid
+from torchvision import transforms
 import numpy as np
 
 import _init_paths  # pylint: disable=unused-import
@@ -75,6 +78,9 @@ def parse_args():
         '--vis', dest='vis', help='visualize detections', action='store_true')
     parser.add_argument(
         '--a', dest='average', help='average the top_k candidate samples', default=1, type=int)
+    parser.add_argument('--k', dest='checkshot',
+                    help='k shot query',
+                    default=1, type=int)
     return parser.parse_args()
 
 def main():
@@ -99,7 +105,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     
-    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-FPN_1x_{}.yaml".format(args.group)
 
     if args.cfg_file is not None:
         merge_cfg_from_file(args.cfg_file)
@@ -110,7 +116,7 @@ def main():
     cfg.SEEN = args.seen
 
     if args.dataset == "fss_cell":
-        cfg.TEST.DATASETS = ('fss_cell',)
+        cfg.TEST.DATASETS = ('fss_cell_test',)
         cfg.MODEL.NUM_CLASSES = 14
     elif args.dataset == "coco2017":
         cfg.TEST.DATASETS = ('coco_2017_val',)
@@ -147,11 +153,35 @@ def main():
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
-        training=False, cat_list=cat_list)
+        training=False, cat_list=cat_list, shot=args.checkshot)
     
     ### Model ###
     model = initialize_model_from_cfg(args, gpu_id=0)
 
+    all_results = OrderedDict({
+        'box':
+        OrderedDict(
+            [
+                ('AP', []),
+                ('AP50', []),
+                ('AP75', []),
+                ('APs', []),
+                ('APm', []),
+                ('APl', []),
+            ]
+        ),
+        'mask':
+        OrderedDict(
+            [
+                ('AP', []),
+                ('AP50', []),
+                ('AP75', []),
+                ('APs', []),
+                ('APm', []),
+                ('APl', []),
+            ]
+        )
+    })
     timer_for_total = defaultdict(Timer)
     timer_for_total['total_test_time'].tic()
     for avg in range(args.average):
@@ -172,7 +202,7 @@ def main():
         num_detect = len(ratio_index)
 
         timers = defaultdict(Timer)
-        post_fix = 'g%d_seen%d_%d'%(args.group, args.seen, avg)
+        post_fix = '%dshot_g%d_seen%d_%d'%(args.checkshot, args.group, args.seen, avg)
         for i, index in enumerate(ratio_index):
             input_data = next(dataiterator)
             catgory = input_data['choice']
@@ -191,8 +221,8 @@ def main():
                 # in-network RPN; 1-stage models don't require proposals.
                 box_proposals = None
             
-            #im = cv2.imread(entry['image'])
-            im = imread(entry['image'])
+            im = cv2.imread(entry['image'])
+            #im = imread(entry['image'])
             
             if len(im.shape) == 2:
                 im = im[:,:,np.newaxis]
@@ -236,18 +266,25 @@ def main():
                 file_name = im_name.split('/')[-3]
                 
                 im_target = im.copy()
-                query = input_data['query'][0][0][0].permute(1, 2, 0).contiguous().cpu().numpy()
-                query *= [0.229, 0.224, 0.225]
-                query += [0.485, 0.456, 0.406]
-                query *= 255
-                #query += cfg.PIXEL_MEANS
-                #query = query[:,:,::-1]
-                query = Image.fromarray(query.astype(np.uint8))
-                query_w, query_h = query.size
+
+                to_tensor = transforms.ToTensor()
+                o_querys=[]
+                for i in range(args.checkshot):
+                    o_query = input_data['query'][0][i][0].permute(1, 2,0).contiguous().cpu().numpy()
+                    o_query *= [0.229, 0.224, 0.225]
+                    o_query += [0.485, 0.456, 0.406]
+                    o_query *= 255
+                    o_query = o_query[:,:,::-1]
+                    o_query = Image.fromarray(o_query.astype(np.uint8))
+                    o_querys.append(to_tensor(o_query))
+                
+                o_querys_grid = make_grid(o_querys, nrow=args.checkshot//2, normalize=True, scale_each=True, pad_value=1)
+                o_querys_grid = transforms.ToPILImage()(o_querys_grid).convert("RGB")
+                query_w, query_h = o_querys_grid.size
                 query_bg = Image.new('RGB', (im_target.shape[1], im_target.shape[0]), (255, 255, 255))
                 bg_w, bg_h = query_bg.size
                 offset = ((bg_w - query_w) // 2, (bg_h - query_h) // 2)
-                query_bg.paste(query, offset)
+                query_bg.paste(o_querys_grid, offset)
                 query = np.asarray(query_bg)
                 im_pair = np.concatenate((im_target, query), axis=1)
                 
@@ -332,16 +369,30 @@ def main():
         )
         logger.info('Wrote detections to: {}'.format(os.path.abspath(det_file)))
         
-        all_results = task_evaluation.evaluate_all(
+        results = task_evaluation.evaluate_all(
             imdb, all_boxes, all_segms, all_keyps, args.output_dir
         )
         task_evaluation.check_expected_results(
-            all_results,
+            results,
             atol=cfg.EXPECTED_RESULTS_ATOL,
             rtol=cfg.EXPECTED_RESULTS_RTOL
         )
-        task_evaluation.log_copy_paste_friendly_results(all_results)
+        for task, metrics in all_results.items():
+            metric_names = metrics.keys()
+            for metric_name in metric_names:
+                all_results[task][metric_name].append(results[imdb.name][task][metric_name])
+        #task_evaluation.log_copy_paste_friendly_results(results)
     
+    for task, metrics in all_results.items():
+        metric_names = metrics.keys()
+        for metric_name in metric_names:
+            values = all_results[task][metric_name]
+            all_results[task][metric_name] = sum(values) / len(values) 
+    post_fix = '%dshot_g%d_seen%d'%(args.checkshot, args.group, args.seen)
+    avg_results_path = os.path.join(args.output_dir, ('avg_cocoeval_' + post_fix + '_results.json'))
+    with open(avg_results_path, 'w') as f:
+        f.write(json.dumps(all_results))
+
     timer_for_total['total_test_time'].toc()
     logger.info('Total inference time: {:.3f}s'.format(timer_for_total['total_test_time'].average_time))
 

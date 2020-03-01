@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # RuntimeError: received 0 items of ancdata. Issue: pytorch/pytorch#973
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
+resource.setrlimit(resource.RLIMIT_NOFILE, (4096*4, rlimit[1]))
 
 
 def parse_args():
@@ -136,7 +136,10 @@ def parse_args():
     parser.add_argument(
         '--use_tfboard', help='Use tensorflow tensorboard to log training info',
         action='store_true')
-
+    parser.add_argument('--k', dest='shot',
+                    help='k shot query',
+                    default=1, type=int)
+    parser.add_argument('--a', dest='average', help='average the top_k candidate samples', default=1, type=int)
     return parser.parse_args()
 
 
@@ -156,7 +159,7 @@ def main():
         raise ValueError("Need Cuda device to run !")
 
     if args.dataset == "fss_cell":
-        cfg.TRAIN.DATASETS = ('fss_cell',)
+        cfg.TRAIN.DATASETS = ('fss_cell_train_val',)
         cfg.MODEL.NUM_CLASSES = 14
     elif args.dataset == "coco2017":
         cfg.TRAIN.DATASETS = ('coco_2017_train',)
@@ -167,7 +170,7 @@ def main():
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
     
-    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-FPN_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
@@ -232,7 +235,7 @@ def main():
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
-        training=True)
+        training=True, shot=args.shot)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -284,6 +287,7 @@ def main():
             # However it's fixed on master.
             # optimizer.load_state_dict(checkpoint['optimizer'])
             misc_utils.load_optimizer_state_dict(optimizer, checkpoint['optimizer'])
+            args.shot = checkpoint['shot']
             if checkpoint['step'] == (checkpoint['iters_per_epoch'] - 1):
                 # Resume from end of an epoch
                 args.start_epoch = checkpoint['epoch'] + 1
@@ -366,24 +370,26 @@ def main():
                 optimizer.step()
                 training_stats.IterToc()
 
-                if (args.step+1) % ckpt_interval_per_epoch == 0:
+                #if (args.step+1) % ckpt_interval_per_epoch == 0:
+                if global_step % 1000 == 0:
                     net_utils.save_ckpt(output_dir, args, maskRCNN, optimizer)
 
                 if args.step % args.disp_interval == 0:
-                    log_training_stats(training_stats, global_step, lr, input_data)
+                    log_training_stats(training_stats, global_step, lr, input_data, args.shot)
 
                 global_step += 1
 
             # ---- End of epoch ----
             # save checkpoint
-            net_utils.save_ckpt(output_dir, args, maskRCNN, optimizer)
+            #net_utils.save_ckpt(output_dir, args, maskRCNN, optimizer)
             # reset starting iter number after first epoch
             args.start_iter = 0
 
         # ---- Training ends ----
+        net_utils.save_ckpt(output_dir, args, maskRCNN, optimizer)
         if iters_per_epoch % args.disp_interval != 0:
             # log last stats at the end
-            log_training_stats(training_stats, global_step, lr, input_data)
+            log_training_stats(training_stats, global_step, lr, input_data, args.shot)
 
     except (RuntimeError, KeyboardInterrupt):
         logger.info('Save ckpt on exception ...')
@@ -397,12 +403,12 @@ def main():
             tblogger.close()
 
 
-def log_training_stats(training_stats, global_step, lr, input_data):
+def log_training_stats(training_stats, global_step, lr, input_data, shot):
     stats = training_stats.GetStats(global_step, lr)
     log_stats(stats, training_stats.misc_args)
     if training_stats.tblogger:
         training_stats.tb_log_stats(stats, global_step)
-        training_stats.tblogger._add_images(global_step, input_data)
+        #training_stats.tblogger._add_images(global_step, input_data, shot)
 
 
 if __name__ == '__main__':

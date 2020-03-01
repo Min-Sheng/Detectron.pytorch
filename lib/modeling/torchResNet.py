@@ -327,13 +327,14 @@ class ResNet_roi_conv5_head_co(nn.Module):
         self.apply(set_bn_fix)
     
     def forward(self, x, y, rpn_ret):
-        x = self.roi_xform(
+        x, y = self.roi_xform(
             x, rpn_ret,
             blob_rois='rois',
             method=cfg.FAST_RCNN.ROI_XFORM_METHOD,
             resolution=cfg.FAST_RCNN.ROI_XFORM_RESOLUTION,
             spatial_scale=self.spatial_scale,
-            sampling_ratio=cfg.FAST_RCNN.ROI_XFORM_SAMPLING_RATIO
+            sampling_ratio=cfg.FAST_RCNN.ROI_XFORM_SAMPLING_RATIO,
+            query_blobs_in=y
         )
         res5_feat = self.res5(x)
         x = self.avgpool(res5_feat)

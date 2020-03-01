@@ -109,9 +109,12 @@ class Generalized_RCNN(nn.Module):
         if not cfg.MODEL.RPN_ONLY:
             self.Box_Head = get_func(cfg.FAST_RCNN.ROI_BOX_HEAD)(
                 self.RPN.dim_out, self.roi_feature_transform, self.Conv_Body.spatial_scale)
-            #self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
-            #    self.Box_Head.dim_out)
-            self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs(
+
+            if cfg.FPN.FPN_ON:
+                self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs(
+                    self.Box_Head.dim_out)
+            else:
+                self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
                 self.Box_Head.dim_out)
 
         # Mask Branch
@@ -178,25 +181,30 @@ class Generalized_RCNN(nn.Module):
             elif method == 'max':
                 feat, _ = torch.max(feats, dim=dim)
             return feat
-
-        query_conv = list(map(list, zip(*query_conv)))
-        query_conv = [pooling(QC_i, method='avg', dim = 0) for QC_i in query_conv]
-
-        rpn_feat = []
-        act_feat = []
-        act_aim = []
-        c_weight = []
-        for IP, QP in zip(blob_conv, query_conv):
-            _rpn_feat, _act_feat, _act_aim, _c_weight = self.match_net(IP, QP)
-            rpn_feat.append(_rpn_feat)
-            act_feat.append(_act_feat)
-            act_aim.append(_act_aim)
-            c_weight.append(_c_weight)
         
-        if len(rpn_feat) == 5:
-            act_feat = act_feat[1:]
-            act_aim = act_aim[1:]
-            c_weight = c_weight[1:]
+        if cfg.FPN.FPN_ON:
+            query_conv = list(map(list, zip(*query_conv)))
+            query_conv = [pooling(QC_i, method='avg', dim = 0) for QC_i in query_conv]
+
+            rpn_feat = []
+            act_feat = []
+            act_aim = []
+            c_weight = []
+            
+            for IP, QP in zip(blob_conv, query_conv):
+                _rpn_feat, _act_feat, _act_aim, _c_weight = self.match_net(IP, QP)
+                rpn_feat.append(_rpn_feat)
+                act_feat.append(_act_feat)
+                act_aim.append(_act_aim)
+                c_weight.append(_c_weight)
+            if len(rpn_feat) == 5:
+                act_feat = act_feat[1:]
+                act_aim = act_aim[1:]
+                c_weight = c_weight[1:]
+
+        else:
+            query_conv = pooling(query_conv)
+            rpn_feat, act_feat, act_aim, c_weight = self.match_net(blob_conv, query_conv)
 
         rpn_ret = self.RPN(rpn_feat, im_info, roidb)
 
@@ -214,15 +222,16 @@ class Generalized_RCNN(nn.Module):
             return_dict['query_conv'] = query_conv
 
         if not cfg.MODEL.RPN_ONLY:
-            if cfg.MODEL.SHARE_RES5 and self.training:
-                #box_feat, query_box_feat, res5_feat, query_res5_feat = self.Box_Head(act_feat, act_aim, rpn_ret)
-                box_feat, res5_feat = self.Box_Head(act_feat, rpn_ret)
-            else:
-                #box_feat, query_box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
-                box_feat= self.Box_Head(act_feat, rpn_ret)
+            if not cfg.FPN.FPN_ON:
+                if cfg.MODEL.SHARE_RES5 and self.training:
+                    box_feat, query_box_feat, res5_feat, query_res5_feat = self.Box_Head(act_feat, act_aim, rpn_ret)
+                else:
+                    box_feat, query_box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
 
-            #cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat, batch_size)
-            cls_score, bbox_pred = self.Box_Outs(box_feat)
+                cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat)
+            else:
+                box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
+                cls_score, bbox_pred = self.Box_Outs(box_feat)
             
         else:
             # TODO: complete the returns for RPN only situation
@@ -246,26 +255,27 @@ class Generalized_RCNN(nn.Module):
                 return_dict['losses']['loss_rpn_bbox'] = loss_rpn_bbox
 
             # bbox loss
-            #loss_cls, loss_bbox, accuracy_cls, margin_loss = fast_rcnn_heads.fast_rcnn_losses(
-            #    cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-            #    rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True, batch_size=batch_size)
-            loss_cls, loss_bbox, accuracy_cls = fast_rcnn_heads.fast_rcnn_losses(
+            loss_cls, loss_bbox, accuracy_cls, margin_loss = fast_rcnn_heads.fast_rcnn_losses(
                 cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=False, batch_size=batch_size)
+                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=True)
+            return_dict['losses']['margin_loss'] = margin_loss
+            #loss_cls, loss_bbox, accuracy_cls = fast_rcnn_heads.fast_rcnn_losses(
+            #    cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
+            #    rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=False)
             return_dict['losses']['loss_cls'] = loss_cls
             return_dict['losses']['loss_bbox'] = loss_bbox
             return_dict['metrics']['accuracy_cls'] = accuracy_cls
-            #return_dict['losses']['margin_loss'] = margin_loss
             
             if cfg.MODEL.MASK_ON:
                 if getattr(self.Mask_Head, 'SHARE_RES5', False):
-                    mask_feat = self.Mask_Head(res5_feat, rpn_ret,
+                    mask_feat = self.Mask_Head(res5_feat, query_res5_feat, rpn_ret,
                                                roi_has_mask_int32=rpn_ret['roi_has_mask_int32'])
-                    #mask_feat = self.Mask_Head(res5_feat, query_res5_feat, rpn_ret,
-                    #                           roi_has_mask_int32=rpn_ret['roi_has_mask_int32'], batch_size=batch_size)
+
                 else:
+                    #mask_feat = self.Mask_Head(act_feat, act_aim, rpn_ret)
                     mask_feat = self.Mask_Head(act_feat, rpn_ret)
-                    #mask_feat = self.Mask_Head(act_feat, act_aim, rpn_ret, batch_size=batch_size)
+
+
                 mask_pred = self.Mask_Outs(mask_feat)
                 # return_dict['mask_pred'] = mask_pred
                 # mask loss
@@ -307,7 +317,7 @@ class Generalized_RCNN(nn.Module):
         return return_dict
 
     def roi_feature_transform(self, blobs_in, rpn_ret, blob_rois='rois', method='RoIPoolF',
-                              resolution=7, spatial_scale=1. / 16., sampling_ratio=0):
+                              resolution=7, spatial_scale=1. / 16., sampling_ratio=0, query_blobs_in=None):
         """Add the specified RoI pooling method. The sampling_ratio argument
         is supported for some, but not all, RoI transform methods.
 
@@ -331,6 +341,7 @@ class Generalized_RCNN(nn.Module):
                 bl_rois = blob_rois + '_fpn' + str(lvl)
                 if len(rpn_ret[bl_rois]):
                     rois = Variable(torch.from_numpy(rpn_ret[bl_rois])).cuda(device_id)
+                    batch_idxs = rois[:, 0].long()
                     if method == 'RoIPoolF':
                         # Warning!: Not check if implementation matches Detectron
                         #xform_out = RoIPoolFunction(resolution, resolution, sc)(bl_in, rois)
@@ -347,8 +358,13 @@ class Generalized_RCNN(nn.Module):
                     elif method == 'RoIAlign':
                         xform_out = ROIAlign((
                             resolution, resolution), sc, sampling_ratio)(bl_in, rois)
-                    bl_out_list.append(xform_out)
-
+                    if query_blobs_in:
+                        query_bl_in = query_blobs_in[k_max - lvl]
+                        query_bl_in = query_bl_in[batch_idxs]
+                        query_bl_in = F.interpolate(query_bl_in, size=[resolution, resolution], mode="bilinear")
+                        bl_out_list.append(torch.cat((xform_out, query_bl_in), dim=1))
+                    else:
+                        bl_out_list.append(xform_out)
             # The pooled features from all levels are concatenated along the
             # batch dimension into a single 4D tensor.
             xform_shuffled = torch.cat(bl_out_list, dim=0)
@@ -359,6 +375,7 @@ class Generalized_RCNN(nn.Module):
             restore_bl = Variable(
                 torch.from_numpy(restore_bl.astype('int64', copy=False))).cuda(device_id)
             xform_out = xform_shuffled[restore_bl]
+            return xform_out
         else:
             # Single feature level
             # rois: holds R regions of interest, each is a 5-tuple
@@ -366,6 +383,7 @@ class Generalized_RCNN(nn.Module):
             # rectangle (x1, y1, x2, y2)
             device_id = blobs_in.get_device()
             rois = Variable(torch.from_numpy(rpn_ret[blob_rois])).cuda(device_id)
+            batch_idxs = rois[:, 0].long()
             if method == 'RoIPoolF':
                 xform_out = ROIPool((resolution, resolution), spatial_scale)(blobs_in, rois)
             #elif method == 'RoICrop':
@@ -378,8 +396,12 @@ class Generalized_RCNN(nn.Module):
             elif method == 'RoIAlign':
                 xform_out = ROIAlign((
                     resolution, resolution), spatial_scale, sampling_ratio)(blobs_in, rois)
-
-        return xform_out
+            if query_blobs_in:
+                query_blobs_in = query_blobs_in[batch_idxs]
+                query_blobs_in = F.interpolate(query_blobs_in, size=[resolution, resolution], mode="bilinear")
+                return xform_out, query_blobs_in
+            else:
+                return xform_out
 
     @check_inference
     def convbody_net(self, data):
@@ -392,10 +414,10 @@ class Generalized_RCNN(nn.Module):
         return blob_conv
 
     @check_inference
-    def mask_net(self, blob_conv, rpn_blob):
+    def mask_net(self, blob_conv, query_conv, rpn_blob):
         """For inference"""
-        mask_feat = self.Mask_Head(blob_conv, rpn_blob)
-        #mask_feat = self.Mask_Head(blob_conv, query_conv, rpn_blob)
+        #mask_feat = self.Mask_Head(blob_conv, rpn_blob)
+        mask_feat = self.Mask_Head(blob_conv, query_conv, rpn_blob)
         mask_pred = self.Mask_Outs(mask_feat)
         return mask_pred
 

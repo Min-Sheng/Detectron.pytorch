@@ -15,7 +15,7 @@ FAST_RCNN:
   ROI_BOX_HEAD: torchResNet.ResNet_roi_conv5_head_co
   ROI_XFORM_METHOD: RoIAlign
 MRCNN:
-  ROI_MASK_HEAD: mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare
+  ROI_MASK_HEAD: mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare_co
   RESOLUTION: 14
   ROI_XFORM_METHOD: RoIAlign
   ROI_XFORM_RESOLUTION: 14
@@ -24,7 +24,7 @@ TRAIN:
   SCALES: (600,)
   MAX_SIZE: 1000
   IMS_PER_BATCH: 1
-  BATCH_SIZE_PER_IM: 512
+  BATCH_SIZE_PER_IM: 256
   CATEGORIES: [1]
 TEST:
   SCALE: 600

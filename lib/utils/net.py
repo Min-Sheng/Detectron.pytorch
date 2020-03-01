@@ -140,12 +140,13 @@ def save_ckpt(output_dir, args, model, optimizer):
     ckpt_dir = os.path.join(output_dir, 'ckpt')
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
-    save_name = os.path.join(ckpt_dir, 'model_{}_{}.pth'.format(args.epoch, args.step))
+    save_name = os.path.join(ckpt_dir, 'model_{}shot_epoch{}_step{}.pth'.format(args.shot, args.epoch, args.step))
     if isinstance(model, mynn.DataParallel):
         model = model.module
     # TODO: (maybe) Do not save redundant shared params
     # model_state_dict = model.state_dict()
     torch.save({
+        'shot': args.shot,
         'epoch': args.epoch,
         'step': args.step,
         'iters_per_epoch': args.iters_per_epoch,

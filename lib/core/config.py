@@ -371,7 +371,7 @@ __C.TEST.KPS_AUG.ASPECT_RATIO_H_FLIP = False
 __C.TEST.SOFT_NMS = AttrDict()
 
 # Use soft NMS instead of standard NMS if set to True
-__C.TEST.SOFT_NMS.ENABLED = True
+__C.TEST.SOFT_NMS.ENABLED = False
 # See soft NMS paper for definition of these options
 __C.TEST.SOFT_NMS.METHOD = 'linear'
 __C.TEST.SOFT_NMS.SIGMA = 0.5
@@ -726,7 +726,7 @@ __C.FPN.RPN_MAX_LEVEL = 6
 # Finest level of the FPN pyramid
 __C.FPN.RPN_MIN_LEVEL = 2
 # FPN RPN anchor aspect ratios
-__C.FPN.RPN_ASPECT_RATIOS = (0.5, 1, 2)
+__C.FPN.RPN_ASPECT_RATIOS = (0.2, 0.5, 1, 2, 5)#(0.5, 1, 2)
 # RPN anchors start at this size on RPN_MIN_LEVEL
 # The anchor size doubled each level after that
 # With a default of 32 and levels 2 to 6, we get anchor sizes of 32 to 512
@@ -973,7 +973,7 @@ __C.MATLAB = 'matlab'
 __C.VIS = False
 
 # Score threshold for visualization
-__C.VIS_TH = 0.9
+__C.VIS_TH = 0.5
 
 # Expected results should take the form of a list of expectations, each
 # specified by four elements (dataset, task, metric, expected value). For

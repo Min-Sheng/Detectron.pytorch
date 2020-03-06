@@ -117,7 +117,7 @@ def main():
 
     if args.dataset == "fss_cell":
         cfg.TEST.DATASETS = ('fss_cell_test',)
-        cfg.MODEL.NUM_CLASSES = 14
+        cfg.MODEL.NUM_CLASSES = 2
     elif args.dataset == "coco2017":
         cfg.TEST.DATASETS = ('coco_2017_val',)
         cfg.MODEL.NUM_CLASSES = 81
@@ -148,7 +148,7 @@ def main():
     batchSampler = BatchSampler(
         sampler=MinibatchSampler(ratio_list, ratio_index, shuffle=False),
         batch_size=1,
-        drop_last=False,
+        drop_last=False
     )
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
@@ -195,8 +195,8 @@ def main():
         dataiterator = iter(dataloader)
 
         num_images = len(ratio_index)
-        num_classes = cfg.MODEL.NUM_CLASSES
-        all_boxes, all_segms, all_keyps = empty_results(num_classes, num_images)
+        num_cats = imdb.num_classes
+        all_boxes, all_segms, all_keyps = empty_results(num_cats, num_images)
         
         # total quantity of testing images
         num_detect = len(ratio_index)
@@ -228,7 +228,7 @@ def main():
                 im = im[:,:,np.newaxis]
                 im = np.concatenate((im,im,im), axis=2)
             
-            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], catgory, box_proposals, timers)
+            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], catgory, num_cats, box_proposals, timers)
 
             extend_results(i, all_boxes, cls_boxes_i)
             if cls_segms_i is not None:

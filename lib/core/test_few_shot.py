@@ -47,7 +47,7 @@ import utils.image as image_utils
 import utils.keypoints as keypoint_utils
 
 
-def im_detect_all(model, im, query, catgory, box_proposals=None, timers=None):
+def im_detect_all(model, im, query, catgory, num_classes, box_proposals=None, timers=None):
     """Process the outputs of model for testing
     Args:
       model: the network module
@@ -72,7 +72,7 @@ def im_detect_all(model, im, query, catgory, box_proposals=None, timers=None):
     # cls_boxes boxes and scores are separated by class and in the format used
     # for evaluating results
     timers['misc_bbox'].tic()
-    scores, boxes, cls_boxes = box_results_with_nms_and_limit(scores, boxes, catgory)
+    scores, boxes, cls_boxes = box_results_with_nms_and_limit(scores, boxes, catgory, num_classes)
     timers['misc_bbox'].toc()
 
     if cfg.MODEL.MASK_ON and boxes.shape[0] > 0:
@@ -81,7 +81,7 @@ def im_detect_all(model, im, query, catgory, box_proposals=None, timers=None):
         timers['im_detect_mask'].toc()
 
         timers['misc_mask'].tic()
-        cls_segms = segm_results(cls_boxes, masks, boxes, im.shape[0], im.shape[1], catgory)
+        cls_segms = segm_results(cls_boxes, masks, boxes, im.shape[0], im.shape[1], catgory, num_classes)
         timers['misc_mask'].toc()
     else:
         cls_segms = None
@@ -201,19 +201,23 @@ def im_detect_mask(model, im_scale, boxes, blob_conv, query_conv):
         act_aim = []
         c_weight = []
         
-        for IP, QP in zip(blob_conv, query_conv):
+        if len(blob_conv) == 5:
+            start_match_idx = 1
+            rpn_feat.append(blob_conv[0])
+        else:
+            start_match_idx = 0
+
+        for IP, QP in zip(blob_conv[start_match_idx:], query_conv[start_match_idx:]):
             _rpn_feat, _act_feat, _act_aim, _c_weight = model.module.match_net(IP, QP)
             rpn_feat.append(_rpn_feat)
             act_feat.append(_act_feat)
             act_aim.append(_act_aim)
             c_weight.append(_c_weight)
-        if len(rpn_feat) == 5:
-            act_feat = act_feat[1:]
-            act_aim = act_aim[1:]
-            c_weight = c_weight[1:]
+
     else:
         rpn_feat, act_feat, act_aim, c_weight = model.module.match_net(blob_conv, query_conv)
-    pred_masks = model.module.mask_net(act_feat, act_aim, inputs)
+    #pred_masks = model.module.mask_net(act_feat, act_aim, inputs)
+    pred_masks = model.module.mask_net(act_feat, inputs)
     pred_masks = pred_masks.data.cpu().numpy().squeeze()
 
     if cfg.MRCNN.CLS_SPECIFIC_MASK:
@@ -265,7 +269,7 @@ def im_detect_keypoints(model, im_scale, boxes, blob_conv, query_conv):
     return pred_heatmaps
 
 
-def box_results_with_nms_and_limit(scores, boxes, catgory):  # NOTE: support single-batch
+def box_results_with_nms_and_limit(scores, boxes, catgory, num_classes):  # NOTE: support single-batch
     """Returns bounding-box detection results by thresholding on scores and
     applying non-maximum suppression (NMS).
 
@@ -279,7 +283,6 @@ def box_results_with_nms_and_limit(scores, boxes, catgory):  # NOTE: support sin
     dataset (including the background class). `scores[i, j]`` corresponds to the
     box at `boxes[i, j * 4:(j + 1) * 4]`.
     """
-    num_classes = cfg.MODEL.NUM_CLASSES
     cls_boxes = [[] for _ in range(num_classes)]
     # Apply threshold on detection probabilities and apply NMS
     # Skip j = 0, because it's the background class
@@ -325,8 +328,7 @@ def box_results_with_nms_and_limit(scores, boxes, catgory):  # NOTE: support sin
     return scores, boxes, cls_boxes
 
 
-def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w, catgory):
-    num_classes = cfg.MODEL.NUM_CLASSES
+def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w, catgory, num_classes):
     cls_segms = [[] for _ in range(num_classes)]
     mask_ind = 0
     # To work around an issue with cv2.resize (it seems to automatically pad

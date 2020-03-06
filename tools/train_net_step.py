@@ -29,6 +29,7 @@ from utils.detectron_weight_helper import load_detectron_weight
 from utils.logging import setup_logging
 from utils.timer import Timer
 from utils.training_stats import TrainingStats
+from utils.logging import log_stats
 
 # Set up logging and load config options
 logger = setup_logging(__name__)
@@ -36,11 +37,12 @@ logging.getLogger('roi_data.loader').setLevel(logging.INFO)
 
 # RuntimeError: received 0 items of ancdata. Issue: pytorch/pytorch#973
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
+resource.setrlimit(resource.RLIMIT_NOFILE, (4096*4, rlimit[1]))
 
 def parse_args():
     """Parse input arguments"""
     parser = argparse.ArgumentParser(description='Train a X-RCNN network')
+
     parser.add_argument(
         '--dataset', dest='dataset', required=True,
         help='Dataset to use')
@@ -60,7 +62,7 @@ def parse_args():
     parser.add_argument(
         '--disp_interval',
         help='Display training info every N iterations',
-        default=20, type=int)
+        default=10, type=int)
     parser.add_argument(
         '--no_cuda', dest='cuda', help='Do not use CUDA device', action='store_false')
 
@@ -114,7 +116,9 @@ def parse_args():
     parser.add_argument(
         '--use_tfboard', help='Use tensorflow tensorboard to log training info',
         action='store_true')
-
+    parser.add_argument('--k', dest='shot',
+                    help='k shot query',
+                    default=1, type=int)
     return parser.parse_args()
 
 
@@ -125,18 +129,18 @@ def save_ckpt(output_dir, args, step, train_size, model, optimizer):
     ckpt_dir = os.path.join(output_dir, 'ckpt')
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
-    save_name = os.path.join(ckpt_dir, 'model_step{}.pth'.format(step))
+    save_name = os.path.join(ckpt_dir, 'model_{}shot_step{}.pth'.format(args.shot, step))
     if isinstance(model, mynn.DataParallel):
         model = model.module
     model_state_dict = model.state_dict()
     torch.save({
+        'shot': args.shot,
         'step': step,
         'train_size': train_size,
         'batch_size': args.batch_size,
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict()}, save_name)
     logger.info('save model: %s', save_name)
-
 
 def main():
     """Main function"""
@@ -152,10 +156,10 @@ def main():
         cfg.CUDA = True
     else:
         raise ValueError("Need Cuda device to run !")
-    
+
     if args.dataset == "fss_cell":
-        cfg.TRAIN.DATASETS = ('fss_cell',)
-        cfg.MODEL.NUM_CLASSES = 14
+        cfg.TRAIN.DATASETS = ('fss_cell_train_val',)
+        cfg.MODEL.NUM_CLASSES = 2
     elif args.dataset == "coco2017":
         cfg.TRAIN.DATASETS = ('coco_2017_train',)
         cfg.MODEL.NUM_CLASSES = 81
@@ -165,7 +169,7 @@ def main():
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
 
-    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/my/e2e_mask_rcnn_R-50-FPN_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
@@ -235,8 +239,7 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(
-        cfg.TRAIN.DATASETS, True)
+    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(cfg.TRAIN.DATASETS, True)
     timers['roidb'].toc()
     roidb_size = len(roidb)
     logger.info('{:d} roidb entries'.format(roidb_size))
@@ -253,7 +256,7 @@ def main():
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
-        training=True)
+        training=True, shot=args.shot)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_sampler=batchSampler,
@@ -322,6 +325,7 @@ def main():
         checkpoint = torch.load(load_name, map_location=lambda storage, loc: storage)
         net_utils.load_ckpt(maskRCNN, checkpoint['model'])
         if args.resume:
+            args.shot = checkpoint['shot']
             args.start_step = checkpoint['step'] + 1
             if 'train_size' in checkpoint:  # For backward compatibility
                 if checkpoint['train_size'] != train_size:
@@ -392,6 +396,8 @@ def main():
 
             # Warm up
             if step < cfg.SOLVER.WARM_UP_ITERS:
+                for p in maskRCNN.module.Conv_Body.parameters():
+                    p.requires_grad = False
                 method = cfg.SOLVER.WARM_UP_METHOD
                 if method == 'constant':
                     warmup_factor = cfg.SOLVER.WARM_UP_FACTOR
@@ -405,6 +411,8 @@ def main():
                 lr = optimizer.param_groups[0]['lr']
                 assert lr == lr_new
             elif step == cfg.SOLVER.WARM_UP_ITERS:
+                for p in maskRCNN.module.Conv_Body.parameters():
+                    p.requires_grad = True
                 net_utils.update_learning_rate(optimizer, lr, cfg.SOLVER.BASE_LR)
                 lr = optimizer.param_groups[0]['lr']
                 assert lr == cfg.SOLVER.BASE_LR
@@ -429,8 +437,11 @@ def main():
                     input_data = next(dataiterator)
 
                 for key in input_data:
-                    if key != 'roidb': # roidb is a list of ndarrays with inconsistent length
+                    if key != 'roidb' and key != 'query': # roidb is a list of ndarrays with inconsistent length
                         input_data[key] = list(map(Variable, input_data[key]))
+                    if key == 'query':
+                        input_data[key] = [list(map(Variable, q)) for q in input_data[key]]
+                        
 
                 net_outputs = maskRCNN(**input_data)
                 training_stats.UpdateIterStats(net_outputs, inner_iter)
@@ -439,10 +450,13 @@ def main():
             optimizer.step()
             training_stats.IterToc()
 
-            training_stats.LogIterStats(step, lr, input_data)
+            training_stats.LogIterStats(step, lr, input_data, args.shot)
 
             if (step+1) % CHECKPOINT_PERIOD == 0:
                 save_ckpt(output_dir, args, step, train_size, maskRCNN, optimizer)
+            
+            if (step+1) % args.disp_interval == 0:
+                log_training_stats(training_stats, step, lr)
 
         # ---- Training ends ----
         # Save last checkpoint
@@ -459,6 +473,10 @@ def main():
     finally:
         if args.use_tfboard and not args.no_save:
             tblogger.close()
+
+def log_training_stats(training_stats, global_step, lr):
+    stats = training_stats.GetStats(global_step, lr)
+    log_stats(stats, training_stats.misc_args)
 
 if __name__ == '__main__':
     main()

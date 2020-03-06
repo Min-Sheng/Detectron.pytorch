@@ -139,7 +139,6 @@ def parse_args():
     parser.add_argument('--k', dest='shot',
                     help='k shot query',
                     default=1, type=int)
-    parser.add_argument('--a', dest='average', help='average the top_k candidate samples', default=1, type=int)
     return parser.parse_args()
 
 
@@ -371,7 +370,7 @@ def main():
                 training_stats.IterToc()
 
                 #if (args.step+1) % ckpt_interval_per_epoch == 0:
-                if global_step % 1000 == 0:
+                if global_step % 500 == 0:
                     net_utils.save_ckpt(output_dir, args, maskRCNN, optimizer)
 
                 if args.step % args.disp_interval == 0:

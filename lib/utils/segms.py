@@ -283,6 +283,6 @@ def rle_mask_wrt_box(rle, box, M):
     sy = max(0, (box[3] - box[1]) / M)
     matrix = np.array([[sx, 0, box[0]], [0, sy, box[1]]], dtype=np.float)
     mask = cv2.warpAffine(mask, matrix, (M, M),
-                          flags=cv2.WARP_INVERSE_MAP + cv2.INTER_NEAREST,
+                          flags=cv2.WARP_INVERSE_MAP + cv2.INTER_LINEAR,
                           borderMode=cv2.BORDER_REFLECT)
     return mask

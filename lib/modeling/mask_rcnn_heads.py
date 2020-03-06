@@ -67,6 +67,7 @@ class mask_rcnn_outputs(nn.Module):
             x = F.sigmoid(x)
         return x
 
+
 # def mask_rcnn_losses(mask_pred, rois_mask, rois_label, weight):
 #     n_rois, n_classes, _, _ = mask_pred.size()
 #     rois_mask_label = rois_label[weight.data.nonzero().view(-1)]
@@ -101,12 +102,6 @@ def mask_rcnn_losses(masks_pred, masks_int32):
 # ---------------------------------------------------------------------------- #
 # Mask heads
 # ---------------------------------------------------------------------------- #
-
-def mask_rcnn_fcn_head_v1up4convs_co(dim_in, roi_xform_func, spatial_scale):
-    """v1up design: 4 * (conv 3x3), convT 2x2."""
-    return mask_rcnn_fcn_head_v1upXconvs_co(
-        dim_in, roi_xform_func, spatial_scale, 4
-    )
 
 def mask_rcnn_fcn_head_v1up4convs(dim_in, roi_xform_func, spatial_scale):
     """v1up design: 4 * (conv 3x3), convT 2x2."""
@@ -192,70 +187,6 @@ class mask_rcnn_fcn_head_v1upXconvs(nn.Module):
         x = self.conv_fcn(x)
         return F.relu(self.upconv(x), inplace=True)
 
-class mask_rcnn_fcn_head_v1upXconvs_co(nn.Module):
-    """v1upXconvs design: X * (conv 3x3), convT 2x2."""
-    def __init__(self, dim_in, roi_xform_func, spatial_scale, num_convs):
-        super().__init__()
-        dim_in = dim_in * 2
-        self.dim_in = dim_in
-        self.roi_xform = roi_xform_func
-        self.spatial_scale = spatial_scale
-        self.num_convs = num_convs
-
-        dilation = cfg.MRCNN.DILATION
-        dim_inner = cfg.MRCNN.DIM_REDUCED
-        self.dim_out = dim_inner
-
-        module_list = []
-        for i in range(num_convs):
-            module_list.extend([
-                nn.Conv2d(dim_in, dim_inner, 3, 1, padding=1*dilation, dilation=dilation),
-                nn.ReLU(inplace=True)
-            ])
-            dim_in = dim_inner
-        self.conv_fcn = nn.Sequential(*module_list)
-
-        # upsample layer
-        self.upconv = nn.ConvTranspose2d(dim_inner, dim_inner, 2, 2, 0)
-
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-            if cfg.MRCNN.CONV_INIT == 'GaussianFill':
-                init.normal_(m.weight, std=0.001)
-            elif cfg.MRCNN.CONV_INIT == 'MSRAFill':
-                mynn.init.MSRAFill(m.weight)
-            else:
-                raise ValueError
-            init.constant_(m.bias, 0)
-
-    def detectron_weight_mapping(self):
-        mapping_to_detectron = {}
-        for i in range(self.num_convs):
-            mapping_to_detectron.update({
-                'conv_fcn.%d.weight' % (2*i): '_[mask]_fcn%d_w' % (i+1),
-                'conv_fcn.%d.bias' % (2*i): '_[mask]_fcn%d_b' % (i+1)
-            })
-        mapping_to_detectron.update({
-            'upconv.weight': 'conv5_mask_w',
-            'upconv.bias': 'conv5_mask_b'
-        })
-
-        return mapping_to_detectron, []
-
-    def forward(self, x, y, rpn_ret):
-        x = self.roi_xform(
-            x, rpn_ret,
-            blob_rois='mask_rois',
-            method=cfg.MRCNN.ROI_XFORM_METHOD,
-            resolution=cfg.MRCNN.ROI_XFORM_RESOLUTION,
-            spatial_scale=self.spatial_scale,
-            sampling_ratio=cfg.MRCNN.ROI_XFORM_SAMPLING_RATIO,
-            query_blobs_in=y
-        )
-        x = self.conv_fcn(x)
-        return F.relu(self.upconv(x), inplace=True)
 
 class mask_rcnn_fcn_head_v1upXconvs_gn(nn.Module):
     """v1upXconvs design: X * (conv 3x3), convT 2x2, with GroupNorm"""
@@ -328,7 +259,6 @@ class mask_rcnn_fcn_head_v0upshare(nn.Module):
     """Use a ResNet "conv5" / "stage5" head for mask prediction. Weights and
     computation are shared with the conv5 box head. Computation can only be
     shared during training, since inference is cascaded.
-
     v0upshare design: conv5, convT 2x2.
     """
     def __init__(self, dim_in, roi_xform_func, spatial_scale):
@@ -395,83 +325,6 @@ class mask_rcnn_fcn_head_v0upshare(nn.Module):
         x = F.relu(x, inplace=True)
         return x
 
-class mask_rcnn_fcn_head_v0upshare_co(nn.Module):
-    """Use a ResNet "conv5" / "stage5" head for mask prediction. Weights and
-    computation are shared with the conv5 box head. Computation can only be
-    shared during training, since inference is cascaded.
-
-    v0upshare design: conv5, convT 2x2.
-    """
-    def __init__(self, dim_in, roi_xform_func, spatial_scale):
-        super().__init__()
-        self.dim_in = dim_in
-        self.roi_xform = roi_xform_func
-        self.spatial_scale = spatial_scale
-        self.dim_out = cfg.MRCNN.DIM_REDUCED
-        self.SHARE_RES5 = True
-        assert cfg.MODEL.SHARE_RES5
-
-        self.res5 = None  # will be assigned later
-        dim_conv5 = 2048 * 2
-        self.upconv5 = nn.ConvTranspose2d(dim_conv5, self.dim_out, 2, 2, 0)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        if cfg.MRCNN.CONV_INIT == 'GaussianFill':
-            init.normal_(self.upconv5.weight, std=0.001)
-        elif cfg.MRCNN.CONV_INIT == 'MSRAFill':
-            mynn.init.MSRAFill(self.upconv5.weight)
-        init.constant_(self.upconv5.bias, 0)
-
-    def share_res5_module(self, res5_target):
-        """ Share res5 block with box head on training """
-        self.res5 = res5_target
-
-    def detectron_weight_mapping(self):
-        detectron_weight_mapping, orphan_in_detectron = \
-          ResNet.residual_stage_detectron_mapping(self.res5, 'res5', 3, 5)
-        # Assign None for res5 modules, do not load from or save to checkpoint
-        for k in detectron_weight_mapping:
-            detectron_weight_mapping[k] = None
-
-        detectron_weight_mapping.update({
-            'upconv5.weight': 'conv5_mask_w',
-            'upconv5.bias': 'conv5_mask_b'
-        })
-        return detectron_weight_mapping, orphan_in_detectron
-
-    def forward(self, x, y, rpn_ret, roi_has_mask_int32=None):
-        if self.training:
-            # On training, we share the res5 computation with bbox head, so it's necessary to
-            # sample 'useful' batches from the input x (res5_2_sum). 'Useful' means that the
-            # batch (roi) has corresponding mask groundtruth, namely having positive values in
-            # roi_has_mask_int32.
-            inds = np.nonzero(roi_has_mask_int32 > 0)[0]
-            inds = Variable(torch.from_numpy(inds)).cuda(x.get_device())
-
-            rois = Variable(torch.from_numpy(rpn_ret['rois'])).cuda(x.get_device())
-            batch_idxs = rois[:, 0].long()
-            y = y[batch_idxs]
-            x = x[inds]
-            y = y[inds]
-        else:
-            # On testing, the computation is not shared with bbox head. This time input `x`
-            # is the output features from the backbone network
-            x, y = self.roi_xform(
-                x, rpn_ret,
-                blob_rois='mask_rois',
-                method=cfg.MRCNN.ROI_XFORM_METHOD,
-                resolution=cfg.MRCNN.ROI_XFORM_RESOLUTION,
-                spatial_scale=self.spatial_scale,
-                sampling_ratio=cfg.MRCNN.ROI_XFORM_SAMPLING_RATIO,
-                query_blobs_in=y
-            )
-            x = self.res5(x)
-        x = torch.cat((x, y), dim=1)
-        x = self.upconv5(x)
-        x = F.relu(x, inplace=True)
-        return x
 
 class mask_rcnn_fcn_head_v0up(nn.Module):
     """v0up design: conv5, deconv 2x2 (no weight sharing with the box head)."""

@@ -82,18 +82,6 @@ class TrainingStats(object):
         for k, loss in model_out['losses'].items():
             assert loss.shape[0] == cfg.NUM_GPUS
             loss = loss.mean(dim=0, keepdim=True)
-            if cfg.FPN.FPN_ON:
-                if k.startswith('loss_rpn_cls_'):
-                    loss *= 2.0
-                elif k.startswith('loss_rpn_bbox_'):
-                    loss *= 1.0
-                elif k == 'loss_cls':
-                    loss *= 2.0
-                elif k == 'loss_bbox':
-                    loss *= 1.0
-                elif k == 'loss_mask':
-                    loss *= 3.0
-                
             total_loss += loss
             loss_data = loss.data[0]
             model_out['losses'][k] = loss
@@ -184,7 +172,7 @@ class TrainingStats(object):
             setattr(self, attr_name, [])
         return mean_val
 
-    def LogIterStats(self, cur_iter, lr, input_data):
+    def LogIterStats(self, cur_iter, lr, input_data, shot):
         """Log the tracked statistics."""
         if (cur_iter % self.LOG_PERIOD == 0 or
                 cur_iter == cfg.SOLVER.MAX_ITER - 1):
@@ -192,7 +180,7 @@ class TrainingStats(object):
             log_stats(stats, self.misc_args)
             if self.tblogger:
                 self.tb_log_stats(stats, cur_iter)
-                self.tblogger._add_images(cur_iter, input_data)
+                self.tblogger._add_images(cur_iter, input_data, shot)
 
     def tb_log_stats(self, stats, cur_iter):
         """Log the tracked statistics to tensorboard"""

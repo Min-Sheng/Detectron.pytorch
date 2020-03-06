@@ -111,7 +111,7 @@ class Generalized_RCNN(nn.Module):
                 self.RPN.dim_out, self.roi_feature_transform, self.Conv_Body.spatial_scale)
 
             if cfg.FPN.FPN_ON:
-                self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs(
+                self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
                     self.Box_Head.dim_out)
             else:
                 self.Box_Outs = fast_rcnn_heads.fast_rcnn_outputs_co(
@@ -157,8 +157,6 @@ class Generalized_RCNN(nn.Module):
 
     def _forward(self, data, query, im_info, roidb=None, **rpn_kwargs):
         im_data = data
-        batch_size = im_data.size(0)
-
         if self.training:
             roidb = list(map(lambda x: blob_utils.deserialize(x)[0], roidb))
 
@@ -191,21 +189,23 @@ class Generalized_RCNN(nn.Module):
             act_aim = []
             c_weight = []
             
-            for IP, QP in zip(blob_conv, query_conv):
+            if len(blob_conv) == 5:
+                start_match_idx = 1
+                rpn_feat.append(blob_conv[0])
+            else:
+                start_match_idx = 0
+
+            for IP, QP in zip(blob_conv[start_match_idx:], query_conv[start_match_idx:]):
                 _rpn_feat, _act_feat, _act_aim, _c_weight = self.match_net(IP, QP)
                 rpn_feat.append(_rpn_feat)
                 act_feat.append(_act_feat)
                 act_aim.append(_act_aim)
                 c_weight.append(_c_weight)
-            if len(rpn_feat) == 5:
-                act_feat = act_feat[1:]
-                act_aim = act_aim[1:]
-                c_weight = c_weight[1:]
 
         else:
             query_conv = pooling(query_conv)
             rpn_feat, act_feat, act_aim, c_weight = self.match_net(blob_conv, query_conv)
-
+        
         rpn_ret = self.RPN(rpn_feat, im_info, roidb)
 
         # if self.training:
@@ -215,7 +215,7 @@ class Generalized_RCNN(nn.Module):
         if cfg.FPN.FPN_ON:
             # Retain only the blobs that will be used for RoI heads. `blob_conv` may include
             # extra blobs that are used for RPN proposals, but not for RoI heads.
-            rpn_feat = rpn_feat[-self.num_roi_levels:]
+            blob_conv = blob_conv[-self.num_roi_levels:]
 
         if not self.training:
             return_dict['blob_conv'] = blob_conv
@@ -230,9 +230,9 @@ class Generalized_RCNN(nn.Module):
 
                 cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat)
             else:
-                box_feat= self.Box_Head(act_feat, act_aim, rpn_ret)
-                cls_score, bbox_pred = self.Box_Outs(box_feat)
-            
+                box_feat, query_box_feat = self.Box_Head(act_feat, act_aim, rpn_ret)
+                cls_score, bbox_pred = self.Box_Outs(box_feat, query_box_feat)
+
         else:
             # TODO: complete the returns for RPN only situation
             pass
@@ -261,21 +261,17 @@ class Generalized_RCNN(nn.Module):
             return_dict['losses']['margin_loss'] = margin_loss
             #loss_cls, loss_bbox, accuracy_cls = fast_rcnn_heads.fast_rcnn_losses(
             #    cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-            #    rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], use_marginloss=False)
+            #    rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'])
             return_dict['losses']['loss_cls'] = loss_cls
             return_dict['losses']['loss_bbox'] = loss_bbox
             return_dict['metrics']['accuracy_cls'] = accuracy_cls
-            
+
             if cfg.MODEL.MASK_ON:
                 if getattr(self.Mask_Head, 'SHARE_RES5', False):
-                    mask_feat = self.Mask_Head(res5_feat, query_res5_feat, rpn_ret,
+                    mask_feat = self.Mask_Head(res5_feat, rpn_ret,
                                                roi_has_mask_int32=rpn_ret['roi_has_mask_int32'])
-
                 else:
-                    #mask_feat = self.Mask_Head(act_feat, act_aim, rpn_ret)
                     mask_feat = self.Mask_Head(act_feat, rpn_ret)
-
-
                 mask_pred = self.Mask_Outs(mask_feat)
                 # return_dict['mask_pred'] = mask_pred
                 # mask loss
@@ -289,7 +285,7 @@ class Generalized_RCNN(nn.Module):
                     kps_feat = self.Keypoint_Head(res5_feat, rpn_ret,
                                                   roi_has_keypoints_int32=rpn_ret['roi_has_keypoint_int32'])
                 else:
-                    kps_feat = self.Keypoint_Head(act_feat, rpn_ret)
+                    kps_feat = self.Keypoint_Head(blob_conv, rpn_ret)
                 kps_pred = self.Keypoint_Outs(kps_feat)
                 # return_dict['keypoints_pred'] = kps_pred
                 # keypoints loss
@@ -307,6 +303,10 @@ class Generalized_RCNN(nn.Module):
                 return_dict['losses'][k] = v.unsqueeze(0)
             for k, v in return_dict['metrics'].items():
                 return_dict['metrics'][k] = v.unsqueeze(0)
+            
+            return_dict['rois'] = rpn_ret['rois']
+            return_dict['cls_score'] = cls_score
+            return_dict['bbox_pred'] = bbox_pred
 
         else:
             # Testing
@@ -320,7 +320,6 @@ class Generalized_RCNN(nn.Module):
                               resolution=7, spatial_scale=1. / 16., sampling_ratio=0, query_blobs_in=None):
         """Add the specified RoI pooling method. The sampling_ratio argument
         is supported for some, but not all, RoI transform methods.
-
         RoIFeatureTransform abstracts away:
           - Use of FPN or not
           - Specifics of the transform method
@@ -335,6 +334,7 @@ class Generalized_RCNN(nn.Module):
             k_min = cfg.FPN.ROI_MIN_LEVEL  # finest level of pyramid
             assert len(blobs_in) == k_max - k_min + 1
             bl_out_list = []
+            query_bl_out_list = []
             for lvl in range(k_min, k_max + 1):
                 bl_in = blobs_in[k_max - lvl]  # blobs_in is in reversed order
                 sc = spatial_scale[k_max - lvl]  # in reversed order
@@ -358,13 +358,13 @@ class Generalized_RCNN(nn.Module):
                     elif method == 'RoIAlign':
                         xform_out = ROIAlign((
                             resolution, resolution), sc, sampling_ratio)(bl_in, rois)
-                    if query_blobs_in:
+                    if blob_rois == 'rois':
                         query_bl_in = query_blobs_in[k_max - lvl]
                         query_bl_in = query_bl_in[batch_idxs]
                         query_bl_in = F.interpolate(query_bl_in, size=[resolution, resolution], mode="bilinear")
-                        bl_out_list.append(torch.cat((xform_out, query_bl_in), dim=1))
-                    else:
-                        bl_out_list.append(xform_out)
+                        query_bl_out_list.append(query_bl_in)
+                    bl_out_list.append(xform_out)
+
             # The pooled features from all levels are concatenated along the
             # batch dimension into a single 4D tensor.
             xform_shuffled = torch.cat(bl_out_list, dim=0)
@@ -375,7 +375,12 @@ class Generalized_RCNN(nn.Module):
             restore_bl = Variable(
                 torch.from_numpy(restore_bl.astype('int64', copy=False))).cuda(device_id)
             xform_out = xform_shuffled[restore_bl]
-            return xform_out
+            if blob_rois == 'rois':
+                query_xform_shuffled = torch.cat(query_bl_out_list, dim=0)
+                query_xform_out = query_xform_shuffled[restore_bl]
+                return xform_out, query_xform_out
+            else:
+                return xform_out
         else:
             # Single feature level
             # rois: holds R regions of interest, each is a 5-tuple
@@ -396,7 +401,7 @@ class Generalized_RCNN(nn.Module):
             elif method == 'RoIAlign':
                 xform_out = ROIAlign((
                     resolution, resolution), spatial_scale, sampling_ratio)(blobs_in, rois)
-            if query_blobs_in:
+            if blob_rois == 'rois':
                 query_blobs_in = query_blobs_in[batch_idxs]
                 query_blobs_in = F.interpolate(query_blobs_in, size=[resolution, resolution], mode="bilinear")
                 return xform_out, query_blobs_in
@@ -414,10 +419,9 @@ class Generalized_RCNN(nn.Module):
         return blob_conv
 
     @check_inference
-    def mask_net(self, blob_conv, query_conv, rpn_blob):
+    def mask_net(self, blob_conv, rpn_blob):
         """For inference"""
-        #mask_feat = self.Mask_Head(blob_conv, rpn_blob)
-        mask_feat = self.Mask_Head(blob_conv, query_conv, rpn_blob)
+        mask_feat = self.Mask_Head(blob_conv, rpn_blob)
         mask_pred = self.Mask_Outs(mask_feat)
         return mask_pred
 

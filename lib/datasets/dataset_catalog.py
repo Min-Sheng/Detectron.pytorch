@@ -42,13 +42,25 @@ DATASETS = {
         IM_DIR:
             _DATA_DIR + '/fss_cell',
         ANN_FN:
-            _DATA_DIR + '/fss_cell/instances_fss_cell_train_val.json'
+            _DATA_DIR + '/fss_cell/instances_fss_cell_poly_train_val.json'
+    },
+    'fss_cell_train':{
+        IM_DIR:
+            _DATA_DIR + '/fss_cell',
+        ANN_FN:
+            _DATA_DIR + '/fss_cell/instances_fss_cell_poly_train.json'
+    },
+    'fss_cell_val':{
+        IM_DIR:
+            _DATA_DIR + '/fss_cell',
+        ANN_FN:
+            _DATA_DIR + '/fss_cell/instances_fss_cell_poly_val.json'
     },
     'fss_cell_test':{
         IM_DIR:
             _DATA_DIR + '/fss_cell',
         ANN_FN:
-            _DATA_DIR + '/fss_cell/instances_fss_cell_test.json'
+            _DATA_DIR + '/fss_cell/instances_fss_cell_poly_test.json'
     },
     'cityscapes_fine_instanceonly_seg_train': {
         IM_DIR:

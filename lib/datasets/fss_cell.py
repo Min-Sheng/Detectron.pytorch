@@ -140,7 +140,7 @@ class JsonDataset(object):
         so we don't need to overwrite it again.
         """
         keys = ['boxes', 'segms', 'gt_classes', 'seg_areas', 'gt_overlaps',
-                'is_crowd', 'box_to_gt_ind_map']
+                'is_crowd', 'box_to_gt_ind_map', 'gt_cats']
         if self.keypoints is not None:
             keys += ['gt_keypoints', 'has_visible_keypoints']
         return keys
@@ -198,9 +198,13 @@ class JsonDataset(object):
         entry['boxes'] = np.empty((0, 4), dtype=np.float32)
         entry['segms'] = []
         entry['gt_classes'] = np.empty((0), dtype=np.int32)
+        entry['gt_cats'] = np.empty((0), dtype=np.int32)
         entry['seg_areas'] = np.empty((0), dtype=np.float32)
+        #entry['gt_overlaps'] = scipy.sparse.csr_matrix(
+        #    np.empty((0, self.num_classes), dtype=np.float32)
+        #)
         entry['gt_overlaps'] = scipy.sparse.csr_matrix(
-            np.empty((0, self.num_classes), dtype=np.float32)
+            np.empty((0, cfg.MODEL.NUM_CLASSES), dtype=np.float32)
         )
         entry['is_crowd'] = np.empty((0), dtype=np.bool)
         # 'box_to_gt_ind_map': Shape is (#rois). Maps from each roi to the index
@@ -266,8 +270,13 @@ class JsonDataset(object):
 
         boxes = np.zeros((num_valid_objs, 4), dtype=entry['boxes'].dtype)
         gt_classes = np.zeros((num_valid_objs), dtype=entry['gt_classes'].dtype)
+        gt_cats = np.zeros((num_valid_objs), dtype=entry['gt_cats'].dtype)
+        #gt_overlaps = np.zeros(
+        #    (num_valid_objs, self.num_classes),
+        #    dtype=entry['gt_overlaps'].dtype
+        #)
         gt_overlaps = np.zeros(
-            (num_valid_objs, self.num_classes),
+            (num_valid_objs, cfg.MODEL.NUM_CLASSES),
             dtype=entry['gt_overlaps'].dtype
         )
         seg_areas = np.zeros((num_valid_objs), dtype=entry['seg_areas'].dtype)
@@ -285,7 +294,9 @@ class JsonDataset(object):
         for ix, obj in enumerate(valid_objs):
             cls = obj['category_id']
             boxes[ix, :] = obj['clean_bbox']
-            gt_classes[ix] = cls
+            #gt_classes[ix] = cls
+            gt_classes[ix] = 1
+            gt_cats[ix] = cls
             seg_areas[ix] = obj['area']
             is_crowd[ix] = obj['iscrowd']
             box_to_gt_ind_map[ix] = ix
@@ -293,7 +304,8 @@ class JsonDataset(object):
                 gt_keypoints[ix, :, :] = self._get_gt_keypoints(obj)
                 if np.sum(gt_keypoints[ix, 2, :]) > 0:
                     im_has_visible_keypoints = True
-            gt_overlaps[ix, cls] = 1.0
+            #gt_overlaps[ix, cls] = 1.0
+            gt_overlaps[ix, 1] = 1.0
         box_utils.validate_boxes(boxes, width=width, height=height)
         entry['boxes'] = np.append(entry['boxes'], boxes, axis=0)
         entry['segms'].extend(valid_segms)
@@ -301,6 +313,7 @@ class JsonDataset(object):
         # entry['boxes'] = np.append(
         #     entry['boxes'], boxes.astype(np.int).astype(np.float), axis=0)
         entry['gt_classes'] = np.append(entry['gt_classes'], gt_classes)
+        entry['gt_cats'] = np.append(entry['gt_cats'], gt_cats)
         entry['seg_areas'] = np.append(entry['seg_areas'], seg_areas)
         entry['gt_overlaps'] = np.append(
             entry['gt_overlaps'].toarray(), gt_overlaps, axis=0
@@ -327,15 +340,16 @@ class JsonDataset(object):
         for entry, cached_entry in zip(roidb, cached_roidb):
             values = [cached_entry[key] for key in self.valid_cached_keys]
             boxes, segms, gt_classes, seg_areas, gt_overlaps, is_crowd, \
-                box_to_gt_ind_map = values[:7]
+                box_to_gt_ind_map, gt_cats = values[:8]
             if self.keypoints is not None:
-                gt_keypoints, has_visible_keypoints = values[7:]
+                gt_keypoints, has_visible_keypoints = values[8:]
             entry['boxes'] = np.append(entry['boxes'], boxes, axis=0)
             entry['segms'].extend(segms)
             # To match the original implementation:
             # entry['boxes'] = np.append(
             #     entry['boxes'], boxes.astype(np.int).astype(np.float), axis=0)
             entry['gt_classes'] = np.append(entry['gt_classes'], gt_classes)
+            entry['gt_cats'] = np.append(entry['gt_cats'], gt_cats)
             entry['seg_areas'] = np.append(entry['seg_areas'], seg_areas)
             entry['gt_overlaps'] = scipy.sparse.csr_matrix(gt_overlaps)
             entry['is_crowd'] = np.append(entry['is_crowd'], is_crowd)
@@ -427,6 +441,7 @@ class JsonDataset(object):
             # Group number to class
             if len(self.list)==1:
                 self.list = list(folds['all'] - folds[self.list[0]])
+                #self.list = [2]
         
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
@@ -439,7 +454,7 @@ class JsonDataset(object):
         all_index = list(range(len(self.image_index)))
 
         for index, info in enumerate(roidb):
-            for cat in info['gt_classes']:
+            for cat in info['gt_cats']:
                 if cat in self.list:
                     all_index.remove(index)
                     break
@@ -488,6 +503,7 @@ def _merge_proposal_boxes_into_roidb(roidb, box_list):
         if len(gt_inds) > 0:
             gt_boxes = entry['boxes'][gt_inds, :]
             gt_classes = entry['gt_classes'][gt_inds]
+            gt_cats = entry['gt_cats'][gt_inds]
             proposal_to_gt_overlaps = box_utils.bbox_overlaps(
                 boxes.astype(dtype=np.float32, copy=False),
                 gt_boxes.astype(dtype=np.float32, copy=False)
@@ -510,6 +526,10 @@ def _merge_proposal_boxes_into_roidb(roidb, box_list):
         entry['gt_classes'] = np.append(
             entry['gt_classes'],
             np.zeros((num_boxes), dtype=entry['gt_classes'].dtype)
+        )
+        entry['gt_cats'] = np.append(
+            entry['gt_cats'],
+            np.zeros((num_boxes), dtype=entry['gt_cats'].dtype)
         )
         entry['seg_areas'] = np.append(
             entry['seg_areas'],

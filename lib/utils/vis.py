@@ -318,8 +318,7 @@ def vis_one_image(
             for c in contour:
                 polygon = Polygon(
                     c.reshape((-1, 2)),
-                    fill=True, facecolor=color_mask,
-                    edgecolor='w', linewidth=1.2,
+                    fill=True, facecolor=color_mask, linewidth=0,
                     alpha=0.4)
                 ax.add_patch(polygon)
 

@@ -42,7 +42,7 @@ def combined_roidb(dataset_names, training=True):
     def get_roidb(dataset_name, training):
         imdb = JsonDataset(dataset_name)
         roidb = imdb.get_roidb(gt=True)
-        
+
         roidb = imdb.filter(roidb)
         if cfg.TRAIN.USE_FLIPPED and training:
             logger.info('Appending horizontally-flipped training examples...')
@@ -64,7 +64,7 @@ def combined_roidb(dataset_names, training=True):
         query_filterd = {k: [x for i, x in enumerate(v) if x['area']>300] for k, v in query.items()}
         querys.append(query_filterd)
         reserveds.append(reserved)
-
+    
     imdb = imdbs[0]
     roidb = roidbs[0]
     query = querys[0]
@@ -79,7 +79,6 @@ def combined_roidb(dataset_names, training=True):
             query[r].extend(querys[1][r])
         for r in reserveds[1:]:
             reserved.extend(r)
-
     if training:
         if cfg.TRAIN.ASPECT_GROUPING or cfg.TRAIN.ASPECT_CROPPING:
         
@@ -105,10 +104,10 @@ def combined_roidb(dataset_names, training=True):
     else:
         return imdb, roidb, ratio_list, ratio_index, query, cat_list
 
+
 def extend_with_flipped_entries(roidb, dataset):
     """Flip each entry in the given roidb and return a new roidb that is the
     concatenation of the original roidb and the flipped entries.
-
     "Flipping" an entry means that that image and associated metadata (e.g.,
     ground truth boxes and object proposals) are horizontally flipped.
     """
@@ -171,7 +170,6 @@ def filter_for_training(roidb):
 def rank_for_training(roidb):
     """Rank the roidb entries according to image aspect ration and mark for cropping
     for efficient batching if image is too long.
-
     Returns:
         ratio_list: ndarray, list of aspect ratios from small to large
         ratio_index: ndarray, list of roidb entry indices correspond to the ratios
@@ -241,7 +239,7 @@ def test_rank_roidb_ratio(roidb, reserved):
         else:
             entry['need_crop'] = False
 
-        for j in np.unique(entry['max_classes']):
+        for j in np.unique(entry['gt_cats']):
             if j in reserved:
                 ratio_list.append(ratio)
                 ratio_index.append(i)
@@ -260,7 +258,7 @@ def test_rank_roidb_ratio(roidb, reserved):
 def test_cat_list(roidb, reserved):
     cat_list = [] # category list reserved
     for i, entry in enumerate(roidb):
-        for j in np.unique(entry['max_classes']):
+        for j in np.unique(entry['gt_cats']):
             if j in reserved:
                 cat_list.append(j)
     cat_list = np.array(cat_list)
@@ -278,8 +276,7 @@ def _compute_targets(entry):
     rois = entry['boxes']
     overlaps = entry['max_overlaps']
     labels = entry['max_classes']
-    #gt_inds = np.where((entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
-    gt_inds = np.where(entry['gt_classes'] > 0)[0]
+    gt_inds = np.where((entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
     # Targets has format (class, tx, ty, tw, th)
     targets = np.zeros((rois.shape[0], 5), dtype=np.float32)
     if len(gt_inds) == 0:
@@ -315,9 +312,8 @@ def _compute_and_log_stats(roidb):
     # Histogram of ground-truth objects
     gt_hist = np.zeros((len(classes)), dtype=np.int)
     for entry in roidb:
-        #gt_inds = np.where(
-        #    (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
-        gt_inds = np.where(entry['gt_classes'] > 0)[0]
+        gt_inds = np.where(
+            (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
         gt_classes = entry['gt_classes'][gt_inds]
         gt_hist += np.histogram(gt_classes, bins=hist_bins)[0]
     logger.debug('Ground-truth class histogram:')

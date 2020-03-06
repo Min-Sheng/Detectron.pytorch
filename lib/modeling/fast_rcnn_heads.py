@@ -12,26 +12,17 @@ import utils.net as net_utils
 class fast_rcnn_outputs(nn.Module):
     def __init__(self, dim_in):
         super().__init__()
+        self.cls_score = nn.Linear(dim_in, cfg.MODEL.NUM_CLASSES)
         if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:  # bg and fg
-            self.cls_score = nn.Sequential(
-                                    nn.Linear(dim_in, 8),
-                                    nn.Linear(8, 2)
-                                    )
             self.bbox_pred = nn.Linear(dim_in, 4 * 2)
         else:
-            self.cls_score = nn.Sequential(
-                                nn.Linear(dim_in, 8),
-                                nn.Linear(8, cfg.MODEL.NUM_CLASSES)
-                                )
             self.bbox_pred = nn.Linear(dim_in, 4 * cfg.MODEL.NUM_CLASSES)
 
         self._init_weights()
 
     def _init_weights(self):
-        init.normal_(self.cls_score[0].weight, std=0.01)
-        init.constant_(self.cls_score[0].bias, 0)
-        init.normal_(self.cls_score[1].weight, std=0.01)
-        init.constant_(self.cls_score[1].bias, 0)
+        init.normal_(self.cls_score.weight, std=0.01)
+        init.constant_(self.cls_score.bias, 0)
         init.normal_(self.bbox_pred.weight, std=0.001)
         init.constant_(self.bbox_pred.bias, 0)
 
@@ -59,18 +50,14 @@ class fast_rcnn_outputs_co(nn.Module):
     def __init__(self, dim_in):
         super().__init__()
         self.dim_in = dim_in
-        if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:  # bg and fg
-            self.cls_score = nn.Sequential(
+        self.cls_score = nn.Sequential(
                                     nn.Linear(dim_in * 2, 8),
-                                    nn.Linear(8, 2)
+                                    nn.Linear(8, cfg.MODEL.NUM_CLASSES)
                                     )
-            self.bbox_pred = nn.Linear(dim_in * 2, 4 * 2)
+        if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:  # bg and fg
+            self.bbox_pred = nn.Linear(dim_in, 4 * 2)
         else:
-            self.cls_score = nn.Sequential(
-                                nn.Linear(dim_in * 2, 8),
-                                nn.Linear(8, cfg.MODEL.NUM_CLASSES)
-                                )
-            self.bbox_pred = nn.Linear(dim_in * 2, 4 * cfg.MODEL.NUM_CLASSES)
+            self.bbox_pred = nn.Linear(dim_in, 4 * cfg.MODEL.NUM_CLASSES)
 
         self._init_weights()
 
@@ -97,11 +84,13 @@ class fast_rcnn_outputs_co(nn.Module):
             x = x.squeeze(3).squeeze(2)
         if query_feat.dim() == 4:
             query_feat = query_feat.squeeze(3).squeeze(2)
+
+        bbox_pred = self.bbox_pred(x)
+
         x = torch.cat((x, query_feat), dim=1).view(-1, self.dim_in * 2)
         cls_score = self.cls_score(x)
         if not self.training:
             cls_score = F.softmax(cls_score, dim=1)
-        bbox_pred = self.bbox_pred(x)
 
         return cls_score, bbox_pred
 
@@ -192,13 +181,13 @@ class roi_2mlp_head_co(nn.Module):
     """Add a ReLU MLP with two hidden layers."""
     def __init__(self, dim_in, roi_xform_func, spatial_scale):
         super().__init__()
-        self.dim_in = dim_in * 2
+        self.dim_in = dim_in
         self.roi_xform = roi_xform_func
         self.spatial_scale = spatial_scale
         self.dim_out = hidden_dim = cfg.FAST_RCNN.MLP_HEAD_DIM
 
         roi_size = cfg.FAST_RCNN.ROI_XFORM_RESOLUTION
-        self.fc1 = nn.Linear(dim_in * 2 *roi_size**2, hidden_dim)
+        self.fc1 = nn.Linear(dim_in * roi_size**2, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
 
         self._init_weights()
@@ -219,7 +208,7 @@ class roi_2mlp_head_co(nn.Module):
         return detectron_weight_mapping, []
 
     def forward(self, x, y , rpn_ret):
-        x = self.roi_xform(
+        x, y = self.roi_xform(
             x, rpn_ret,
             blob_rois='rois',
             method=cfg.FAST_RCNN.ROI_XFORM_METHOD,
@@ -232,7 +221,10 @@ class roi_2mlp_head_co(nn.Module):
         x = F.relu(self.fc1(x.view(batch_size, -1)), inplace=True)
         x = F.relu(self.fc2(x), inplace=True)
 
-        return x
+        y = F.relu(self.fc1(y.view(batch_size, -1)), inplace=True)
+        y = F.relu(self.fc2(y), inplace=True)
+
+        return x, y
 
 class roi_Xconv1fc_head(nn.Module):
     """Add a X conv + 1fc head, as a reference if not using GroupNorm"""
@@ -358,3 +350,4 @@ class roi_Xconv1fc_gn_head(nn.Module):
         x = self.convs(x)
         x = F.relu(self.fc(x.view(batch_size, -1)), inplace=True)
         return x
+        

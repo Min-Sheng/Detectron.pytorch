@@ -26,6 +26,7 @@ cfg = __C
 
 __C.SEEN = 1
 
+
 # Random note: avoid using '.ON' as a config key since yaml converts it to True;
 # prefer 'ENABLED' instead
 
@@ -40,9 +41,6 @@ __C.TRAIN = AttrDict()
 __C.TRAIN.DATASETS = ()
 
 __C.TRAIN.CATEGORIES = [1]
-
-# For COCO, setting USE_ALL_GT to False will exclude boxes that are flagged as ''iscrowd''
-__C.TRAIN.USE_ALL_GT = True
 
 # Scales to use during training
 # Each scale is the pixel size of an image's shortest side
@@ -62,7 +60,7 @@ __C.TRAIN.IMS_PER_BATCH = 2
 # Total number of RoIs per training minibatch =
 #   TRAIN.BATCH_SIZE_PER_IM * TRAIN.IMS_PER_BATCH * NUM_GPUS
 # E.g., a common configuration is: 512 * 2 * 8 = 8192
-__C.TRAIN.BATCH_SIZE_PER_IM = 256
+__C.TRAIN.BATCH_SIZE_PER_IM = 64
 
 # Fraction of minibatch that is labeled foreground (i.e. class > 0)
 __C.TRAIN.FG_FRACTION = 0.25
@@ -73,7 +71,7 @@ __C.TRAIN.FG_THRESH = 0.5
 # Overlap threshold for a ROI to be considered background (class = 0 if
 # overlap in [LO, HI))
 __C.TRAIN.BG_THRESH_HI = 0.5
-__C.TRAIN.BG_THRESH_LO = 0.0 # Set it to 0 to make all the rois size the same
+__C.TRAIN.BG_THRESH_LO = 0.0
 
 # Use horizontally-flipped images during training?
 __C.TRAIN.USE_FLIPPED = True
@@ -92,7 +90,7 @@ __C.TRAIN.PROPOSAL_FILES = ()
 # Snapshot (model checkpoint) period
 # Divide by NUM_GPUS to determine actual period (e.g., 20000/8 => 2500 iters)
 # to allow for linear training schedule scaling
-__C.TRAIN.SNAPSHOT_ITERS = 10000 #20000
+__C.TRAIN.SNAPSHOT_ITERS = 1000 #20000
 
 # Normalize the targets (subtract empirical mean, divide by empirical stddev)
 __C.TRAIN.BBOX_NORMALIZE_TARGETS = True
@@ -111,7 +109,7 @@ __C.TRAIN.BBOX_NORMALIZE_STDS = (0.1, 0.1, 0.2, 0.2)
 __C.TRAIN.ASPECT_GROUPING = True
 
 # Crop images that have too small or too large aspect ratio
-__C.TRAIN.ASPECT_CROPPING = True #False
+__C.TRAIN.ASPECT_CROPPING = False
 __C.TRAIN.ASPECT_HI = 2
 __C.TRAIN.ASPECT_LO = 0.5
 
@@ -153,12 +151,12 @@ __C.TRAIN.RPN_STRADDLE_THRESH = 0
 
 # Proposal height and width both need to be greater than RPN_MIN_SIZE
 # (at orig image scale; not scale used during training or inference)
-__C.TRAIN.RPN_MIN_SIZE = 8
+__C.TRAIN.RPN_MIN_SIZE = 0
 
 # Filter proposals that are inside of crowd regions by CROWD_FILTER_THRESH
 # "Inside" is measured as: proposal-with-crowd intersection area divided by
 # proposal area
-__C.TRAIN.CROWD_FILTER_THRESH = 0 #0.7
+__C.TRAIN.CROWD_FILTER_THRESH = 0.7
 
 # Ignore ground-truth objects with area < this threshold
 __C.TRAIN.GT_MIN_AREA = -1
@@ -215,20 +213,20 @@ __C.TEST.RPN_NMS_THRESH = 0.7
 
 # Number of top scoring RPN proposals to keep before applying NMS
 # When FPN is used, this is *per FPN level* (not total)
-__C.TEST.RPN_PRE_NMS_TOP_N = 6000 #12000
+__C.TEST.RPN_PRE_NMS_TOP_N = 12000
 
 # Number of top scoring RPN proposals to keep after applying NMS
 # This is the total number of RPN proposals produced (for both FPN and non-FPN
 # cases)
-__C.TEST.RPN_POST_NMS_TOP_N = 1000 #2000
+__C.TEST.RPN_POST_NMS_TOP_N = 2000
 
 # Proposal height and width both need to be greater than RPN_MIN_SIZE
 # (at orig image scale; not scale used during training or inference)
-__C.TEST.RPN_MIN_SIZE = 8
+__C.TEST.RPN_MIN_SIZE = 0
 
 # Maximum number of detections to return per image (100 is based on the limit
 # established for the COCO dataset)
-__C.TEST.DETECTIONS_PER_IM = 1000
+__C.TEST.DETECTIONS_PER_IM = 500
 
 # Minimum score threshold (assuming scores in a [0, 1] range); a value chosen to
 # balance obtaining high recall with not having too many low precision
@@ -243,7 +241,7 @@ __C.TEST.COMPETITION_MODE = True
 # Evaluate detections with the COCO json dataset eval code even if it's not the
 # evaluation code for the dataset (e.g. evaluate PASCAL VOC results using the
 # COCO API to get COCO style AP on PASCAL VOC)
-__C.TEST.FORCE_JSON_DATASET_EVAL = True
+__C.TEST.FORCE_JSON_DATASET_EVAL = False
 
 # [Inferred value; do not set directly in a config]
 # Indicates if precomputed proposals are used at test time
@@ -371,7 +369,7 @@ __C.TEST.KPS_AUG.ASPECT_RATIO_H_FLIP = False
 __C.TEST.SOFT_NMS = AttrDict()
 
 # Use soft NMS instead of standard NMS if set to True
-__C.TEST.SOFT_NMS.ENABLED = False
+__C.TEST.SOFT_NMS.ENABLED = True #False
 # See soft NMS paper for definition of these options
 __C.TEST.SOFT_NMS.METHOD = 'linear'
 __C.TEST.SOFT_NMS.SIGMA = 0.5
@@ -417,7 +415,7 @@ __C.MODEL.NUM_CLASSES = -1
 
 # Use a class agnostic bounding box regressor instead of the default per-class
 # regressor
-__C.MODEL.CLS_AGNOSTIC_BBOX_REG = True
+__C.MODEL.CLS_AGNOSTIC_BBOX_REG = False
 
 # Default weights on (dx, dy, dw, dh) for normalizing bbox regression targets
 # These are empirically chosen to approximately lead to unit variance targets
@@ -524,7 +522,7 @@ __C.RETINANET.SHARE_CLS_BBOX_TOWER = False
 
 # Use class specific bounding box regression instead of the default class
 # agnostic regression
-__C.RETINANET.CLASS_SPECIFIC_BBOX = True
+__C.RETINANET.CLASS_SPECIFIC_BBOX = False
 
 # Whether softmax should be used in classification branch training
 __C.RETINANET.SOFTMAX = False
@@ -601,7 +599,7 @@ __C.SOLVER.BIAS_DOUBLE_LR = True
 __C.SOLVER.BIAS_WEIGHT_DECAY = False
 
 # Warm up to SOLVER.BASE_LR over this number of SGD iterations
-__C.SOLVER.WARM_UP_ITERS = 0 #500
+__C.SOLVER.WARM_UP_ITERS = 1000 #500
 
 # Start the warm up from SOLVER.BASE_LR * SOLVER.WARM_UP_FACTOR
 __C.SOLVER.WARM_UP_FACTOR = 1.0 / 3.0
@@ -611,7 +609,7 @@ __C.SOLVER.WARM_UP_METHOD = 'linear'
 
 # Scale the momentum update history by new_lr / old_lr when updating the
 # learning rate (this is correct given MomentumSGDUpdateOp)
-__C.SOLVER.SCALE_MOMENTUM = False #True
+__C.SOLVER.SCALE_MOMENTUM = True
 # Only apply the correction if the relative LR change exceeds this threshold
 # (prevents ever change in linear warm up from scaling the momentum by a tiny
 # amount; momentum scaling is only important if the LR change is large)
@@ -631,7 +629,6 @@ __C.FAST_RCNN = AttrDict()
 # The string must match a function this is imported in modeling.model_builder
 # (e.g., 'head_builder.add_roi_2mlp_head' to specify a two hidden layer MLP)
 __C.FAST_RCNN.ROI_BOX_HEAD = ''
-__C.FAST_RCNN.QUERY_BOX_HEAD = ''
 
 # Hidden layer dimension when using an MLP for the RoI box head
 __C.FAST_RCNN.MLP_HEAD_DIM = 1024
@@ -726,11 +723,11 @@ __C.FPN.RPN_MAX_LEVEL = 6
 # Finest level of the FPN pyramid
 __C.FPN.RPN_MIN_LEVEL = 2
 # FPN RPN anchor aspect ratios
-__C.FPN.RPN_ASPECT_RATIOS = (0.2, 0.5, 1, 2, 5)#(0.5, 1, 2)
+__C.FPN.RPN_ASPECT_RATIOS = (0.2, 0.5, 1, 2, 5)
 # RPN anchors start at this size on RPN_MIN_LEVEL
 # The anchor size doubled each level after that
 # With a default of 32 and levels 2 to 6, we get anchor sizes of 32 to 512
-__C.FPN.RPN_ANCHOR_START_SIZE = 16
+__C.FPN.RPN_ANCHOR_START_SIZE = 32
 # [Infered Value] Scale for RPN_POST_NMS_TOP_N.
 # Automatically infered in training, fixed to 1 in testing.
 __C.FPN.RPN_COLLECT_SCALE = 1
@@ -780,7 +777,7 @@ __C.MRCNN.CONV_INIT = 'GaussianFill'
 
 # Use class specific mask predictions if True (otherwise use class agnostic mask
 # predictions)
-__C.MRCNN.CLS_SPECIFIC_MASK = False
+__C.MRCNN.CLS_SPECIFIC_MASK = True
 
 # Multi-task loss weight for masks
 __C.MRCNN.WEIGHT_LOSS_MASK = 1.0
@@ -964,7 +961,7 @@ __C.EPS = 1e-14
 __C.ROOT_DIR = osp.abspath(osp.join(osp.dirname(__file__), '..', '..'))
 
 # Output basedir
-__C.OUTPUT_DIR = '/work/vincentwu929/Detectron.pytorch/Outputs'
+__C.OUTPUT_DIR = 'Outputs'
 
 # Name (or path to) the matlab executable
 __C.MATLAB = 'matlab'
@@ -1012,7 +1009,6 @@ __C.PYTORCH_VERSION_LESS_THAN_040 = False
 _SHARE_RES5_HEADS = set(
     [
         'mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare',
-        'mask_rcnn_heads.mask_rcnn_fcn_head_v0upshare_co'
     ]
 )
 

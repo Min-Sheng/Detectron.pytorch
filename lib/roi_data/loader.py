@@ -6,6 +6,7 @@ from collections import Counter
 import cv2
 from scipy.misc import imread
 
+
 import torch
 import torch.utils.data as data
 import torch.utils.data.sampler as torch_sampler
@@ -38,23 +39,20 @@ class RoiDataLoader(data.Dataset):
         index, ratio = index_tuple
         single_db = [self._roidb[index]]
         blobs, valid = get_minibatch(single_db)
-        
         #TODO: Check if minibatch is valid ? If not, abandon it.
         # Need to change _worker_loop in torch.utils.data.dataloader.py.
 
         # Squeeze batch dim
         for key in blobs:
-            if key != 'roidb' and key != 'gt_boxes':
+            if key != 'roidb'  and key != 'gt_cats':
                 blobs[key] = blobs[key].squeeze(axis=0)
 
-        
-        blobs['gt_boxes'] = [x for x in blobs['gt_boxes'] if x[-1] in self.list]
-        blobs['gt_boxes'] = np.array(blobs['gt_boxes'])
+        blobs['gt_cats'] = [x for x in blobs['gt_cats'] if x in self.list]
+        blobs['gt_cats'] = np.array(blobs['gt_cats'])
 
-        
         if self.training:
             # Random choice query catgory
-            catgory = blobs['gt_boxes'][:,-1]
+            catgory = blobs['gt_cats']
             cand = np.unique(catgory)
             if len(cand)==1:
                 choice = cand[0]
@@ -73,12 +71,12 @@ class RoiDataLoader(data.Dataset):
 
         blobs['query'] = query
 
-        if 'gt_boxes' in blobs: 
-            del blobs['gt_boxes']
+        if 'gt_cats' in blobs: 
+            del blobs['gt_cats']
             
         if self.training:
             if self._roidb[index]['need_crop']:
-                self.suffle_crop_data(blobs, ratio)
+                self.crop_data(blobs, ratio)
                 # Check bounding box
                 entry = blobs['roidb'][0]
                 boxes = entry['boxes']
@@ -91,7 +89,8 @@ class RoiDataLoader(data.Dataset):
                             entry[key] = entry[key][valid_inds]
                     entry['segms'] = [entry['segms'][ind] for ind in valid_inds]
 
-            blobs['roidb'] = blob_utils.serialize(blobs['roidb'])
+            blobs['roidb'] = blob_utils.serialize(blobs['roidb'])  # CHECK: maybe we can serialize in collate_fn
+
             return blobs
         else:
             blobs['roidb'] = blob_utils.serialize(blobs['roidb'])
@@ -99,15 +98,9 @@ class RoiDataLoader(data.Dataset):
             blobs['choice'] = choice
             return blobs
 
-    def suffle_crop_data(self, blobs, ratio):
+    def crop_data(self, blobs, ratio):
         data_height, data_width = map(int, blobs['im_info'][:2])
-        #entry = blobs['roidb'][0]
-        #indices = np.arange(len(entry['boxes']))
-        #np.random.shuffle(indices)
-        #for key in entry.keys():
-        #    entry[key] = entry[key][indices]
         boxes = blobs['roidb'][0]['boxes']
-
         if ratio < 1:  # width << height, crop height
             size_crop = math.ceil(data_width / ratio)  # size after crop
             min_y = math.floor(np.min(boxes[:, 1]))
@@ -165,7 +158,7 @@ class RoiDataLoader(data.Dataset):
             np.clip(boxes[:, 0], 0, size_crop - 1, out=boxes[:, 0])
             np.clip(boxes[:, 2], 0, size_crop - 1, out=boxes[:, 2])
             blobs['roidb'][0]['boxes'] = boxes
-    
+
     def load_query(self, choice, id=0):
     
         if self.training:
@@ -213,10 +206,10 @@ class RoiDataLoader(data.Dataset):
             query.append(blob_utils.im_list_to_blob(im).squeeze(0))
 
         return query
-
+    
     def __len__(self):
         return self.data_size
-
+    
     def filter(self):
 
         folds = {
@@ -239,6 +232,7 @@ class RoiDataLoader(data.Dataset):
             # Group number to class
             if len(self.list)==1:
                 self.list = list(folds['all'] - folds[self.list[0]])
+                #self.list = [2]
         
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
@@ -251,7 +245,7 @@ class RoiDataLoader(data.Dataset):
         for i in self.list:
             show_time[i] = 0
         for roi in self._roidb:
-            result = Counter(roi['gt_classes'])
+            result = Counter(roi['gt_cats'])
             for t in result:
                 if t in self.list:
                     show_time[t] += result[t]
@@ -265,6 +259,7 @@ class RoiDataLoader(data.Dataset):
             show_time[i] = show_time[i]/sum_prob
         
         self.show_time = show_time
+
 
 
 def cal_minibatch_ratio(ratio_list):
@@ -320,13 +315,9 @@ class MinibatchSampler(torch_sampler.Sampler):
             ratio_index = self.ratio_index[indices]
             ratio_list_minibatch = self.ratio_list_minibatch[indices]
         else:
-            if self.shuffle:
-                rand_perm = npr.permutation(self.num_data)
-                ratio_list = self.ratio_list[rand_perm]
-                ratio_index = self.ratio_index[rand_perm]
-            else:
-                ratio_list = self.ratio_list
-                ratio_index = self.ratio_index
+            rand_perm = npr.permutation(self.num_data)
+            ratio_list = self.ratio_list[rand_perm]
+            ratio_index = self.ratio_index[rand_perm]
             # re-calculate minibatch ratio list
             ratio_list_minibatch = cal_minibatch_ratio(ratio_list)
 

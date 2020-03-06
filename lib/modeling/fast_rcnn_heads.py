@@ -55,10 +55,16 @@ class fast_rcnn_outputs_co(nn.Module):
                                     nn.Linear(8, cfg.MODEL.NUM_CLASSES)
                                     )
         if cfg.MODEL.CLS_AGNOSTIC_BBOX_REG:  # bg and fg
-            self.bbox_pred = nn.Linear(dim_in, 4 * 2)
+            self.bbox_pred = nn.Sequential(
+                                    nn.Linear(dim_in * 2, 32),
+                                    nn.Linear(32, 4 * 2)
+                                    )
+            
         else:
-            self.bbox_pred = nn.Linear(dim_in, 4 * cfg.MODEL.NUM_CLASSES)
-
+            self.bbox_pred = nn.Sequential(
+                                    nn.Linear(dim_in * 2, 32),
+                                    nn.Linear(32, 4 * cfg.MODEL.NUM_CLASSES)
+                                    )
         self._init_weights()
 
     def _init_weights(self):
@@ -66,8 +72,11 @@ class fast_rcnn_outputs_co(nn.Module):
         init.constant_(self.cls_score[0].bias, 0)
         init.normal_(self.cls_score[1].weight, std=0.01)
         init.constant_(self.cls_score[1].bias, 0)
-        init.normal_(self.bbox_pred.weight, std=0.001)
-        init.constant_(self.bbox_pred.bias, 0)
+
+        init.normal_(self.bbox_pred[0].weight, std=0.001)
+        init.constant_(self.bbox_pred[0].bias, 0)
+        init.normal_(self.bbox_pred[1].weight, std=0.001)
+        init.constant_(self.bbox_pred[1].bias, 0)
 
     def detectron_weight_mapping(self):
         detectron_weight_mapping = {
@@ -85,12 +94,12 @@ class fast_rcnn_outputs_co(nn.Module):
         if query_feat.dim() == 4:
             query_feat = query_feat.squeeze(3).squeeze(2)
 
-        bbox_pred = self.bbox_pred(x)
-
         x = torch.cat((x, query_feat), dim=1).view(-1, self.dim_in * 2)
         cls_score = self.cls_score(x)
         if not self.training:
             cls_score = F.softmax(cls_score, dim=1)
+
+        bbox_pred = self.bbox_pred(x)
 
         return cls_score, bbox_pred
 

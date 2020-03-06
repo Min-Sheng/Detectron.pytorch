@@ -169,7 +169,7 @@ def main():
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
 
-    args.cfg_file = "configs/my/e2e_mask_rcnn_R-50-FPN_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-FPN_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)

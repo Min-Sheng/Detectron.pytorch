@@ -90,7 +90,7 @@ __C.TRAIN.PROPOSAL_FILES = ()
 # Snapshot (model checkpoint) period
 # Divide by NUM_GPUS to determine actual period (e.g., 20000/8 => 2500 iters)
 # to allow for linear training schedule scaling
-__C.TRAIN.SNAPSHOT_ITERS = 1000 #20000
+__C.TRAIN.SNAPSHOT_ITERS = 4000 #20000
 
 # Normalize the targets (subtract empirical mean, divide by empirical stddev)
 __C.TRAIN.BBOX_NORMALIZE_TARGETS = True
@@ -599,7 +599,7 @@ __C.SOLVER.BIAS_DOUBLE_LR = True
 __C.SOLVER.BIAS_WEIGHT_DECAY = False
 
 # Warm up to SOLVER.BASE_LR over this number of SGD iterations
-__C.SOLVER.WARM_UP_ITERS = 1000 #500
+__C.SOLVER.WARM_UP_ITERS = 500
 
 # Start the warm up from SOLVER.BASE_LR * SOLVER.WARM_UP_FACTOR
 __C.SOLVER.WARM_UP_FACTOR = 1.0 / 3.0
@@ -609,7 +609,7 @@ __C.SOLVER.WARM_UP_METHOD = 'linear'
 
 # Scale the momentum update history by new_lr / old_lr when updating the
 # learning rate (this is correct given MomentumSGDUpdateOp)
-__C.SOLVER.SCALE_MOMENTUM = True
+__C.SOLVER.SCALE_MOMENTUM = False #True
 # Only apply the correction if the relative LR change exceeds this threshold
 # (prevents ever change in linear warm up from scaling the momentum by a tiny
 # amount; momentum scaling is only important if the LR change is large)

@@ -232,7 +232,6 @@ class RoiDataLoader(data.Dataset):
             # Group number to class
             if len(self.list)==1:
                 self.list = list(folds['all'] - folds[self.list[0]])
-                #self.list = [2]
         
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES

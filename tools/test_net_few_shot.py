@@ -221,15 +221,31 @@ def main():
                 # in-network RPN; 1-stage models don't require proposals.
                 box_proposals = None
             
-            im = cv2.imread(entry['image'])
-            #im = imread(entry['image'])
-            
+            #im = cv2.imread(entry['image'])
+            im = imread(entry['image'])
+
             if len(im.shape) == 2:
                 im = im[:,:,np.newaxis]
                 im = np.concatenate((im,im,im), axis=2)
+
+            alpha = 2.2 # Simple contrast control
+            beta = 0.5    # Simple brightness control
+            im_colored = im.copy()
+            if catgory[0].item() == 7:
+                im_colored[:,:,0] = 0
+                im_colored[:,:,1] = 0
+                im_colored = cv2.convertScaleAbs(im_colored, alpha=alpha, beta=beta)
+            elif catgory[0].item() == 8:
+                im_colored[:,:,1] = 0
+                im_colored[:,:,2] = 0
+                im_colored = cv2.convertScaleAbs(im_colored, alpha=alpha, beta=beta)
+            elif catgory[0].item() == 6: 
+                im_colored[:,:,0] = 0
+                im_colored[:,:,2] = 0
+                im_colored = cv2.convertScaleAbs(im_colored, alpha=alpha, beta=beta)
             
             cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], catgory, num_cats, box_proposals, timers)
-
+            im = im_colored
             extend_results(i, all_boxes, cls_boxes_i)
             if cls_segms_i is not None:
                 extend_results(i, all_segms, cls_segms_i)
@@ -274,7 +290,20 @@ def main():
                     o_query *= [0.229, 0.224, 0.225]
                     o_query += [0.485, 0.456, 0.406]
                     o_query *= 255
-                    o_query = o_query[:,:,::-1]
+                    o_query_colored = o_query.copy()
+                    if catgory[0].item() == 7:
+                        o_query_colored[:,:,0] = 0
+                        o_query_colored[:,:,1] = 0
+                        o_query_colored = cv2.convertScaleAbs(o_query_colored, alpha=alpha, beta=beta)
+                    elif catgory[0].item() == 8:
+                        o_query_colored[:,:,1] = 0
+                        o_query_colored[:,:,2] = 0
+                        o_query_colored = cv2.convertScaleAbs(o_query_colored, alpha=alpha, beta=beta)
+                    elif catgory[0].item() == 6: 
+                        o_query_colored[:,:,0] = 0
+                        o_query_colored[:,:,2] = 0
+                        o_query_colored = cv2.convertScaleAbs(o_query_colored, alpha=alpha, beta=beta)
+                    o_query = o_query_colored
                     o_query = Image.fromarray(o_query.astype(np.uint8))
                     o_querys.append(to_tensor(o_query))
                 
@@ -287,6 +316,37 @@ def main():
                 query_bg.paste(o_querys_grid, offset)
                 query = np.asarray(query_bg)
                 im_pair = np.concatenate((im_target, query), axis=1)
+                
+                im_output_dir = os.path.join(args.output_dir, 'vis', post_fix, class_name)
+
+                if not os.path.exists(im_output_dir):
+                    os.makedirs(im_output_dir)
+
+                sample_output_dir = os.path.join(im_output_dir, os.path.basename('{:d}_{:s}'.format(i, file_name)))
+
+                if not os.path.exists(sample_output_dir):
+                    os.makedirs(sample_output_dir)
+                
+                target_save_name = os.path.join(sample_output_dir, os.path.basename('{:d}_{:s}'.format(i, file_name)) + '_target.pdf')
+                target = Image.fromarray(im_target.astype(np.uint8))
+                target.save(target_save_name,"pdf")
+
+                query_save_name = os.path.join(sample_output_dir, os.path.basename('{:d}_{:s}'.format(i, file_name)) + '_query.pdf')
+                query = Image.fromarray(query.astype(np.uint8))
+                query.save(query_save_name,"pdf")
+
+                pred_save_name = os.path.join(sample_output_dir, os.path.basename('{:d}_{:s}'.format(i, file_name)) + '_pred.pdf')
+                vis_utils.save_one_image(
+                        im,
+                        pred_save_name,
+                        cls_boxes_i,
+                        segms = cls_segms_i,
+                        keypoints = cls_keyps_i,
+                        thresh = cfg.VIS_TH,
+                        box_alpha = 0.6,
+                        dataset = imdb,
+                        show_class = False
+                    )
                 
                 im_det = vis_utils.vis_one_image(
                         im,
@@ -301,7 +361,12 @@ def main():
                         show_class = False,
                         class_name = class_name
                     )
-                
+                 
+                gt_save_name = os.path.join(sample_output_dir, os.path.basename('{:d}_{:s}'.format(i, file_name)) + '_gt.pdf')
+                vis_utils.save_one_image_gt(
+                        im, entry['id'], 
+                        gt_save_name,
+                        dataset = imdb)
                 im_gt = vis_utils.vis_one_image_gt(
                         im, entry['id'], 
                         '{:d}_gt_{:s}'.format(i, file_name),
@@ -313,14 +378,8 @@ def main():
                 im2draw = np.concatenate((im_gt, im_det), axis=1)
                 im2show = np.concatenate((im_pair, im2draw), axis=0)
 
-                im_output_dir = os.path.join(args.output_dir, 'vis', post_fix, class_name)
-
-                if not os.path.exists(im_output_dir):
-                    os.makedirs(im_output_dir)
-                
                 im_save_name = os.path.basename('{:d}_{:s}'.format(i, file_name)) + '.png'
-                cv2.imwrite(os.path.join(im_output_dir, '{}'.format(im_save_name)), im2show)
-                
+                cv2.imwrite(os.path.join(im_output_dir, '{}'.format(im_save_name)), cv2.cvtColor(im2show, cv2.COLOR_RGB2BGR))
 
             
             """

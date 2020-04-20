@@ -441,7 +441,6 @@ class JsonDataset(object):
             # Group number to class
             if len(self.list)==1:
                 self.list = list(folds['all'] - folds[self.list[0]])
-                #self.list = [2]
         
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
@@ -503,7 +502,7 @@ def _merge_proposal_boxes_into_roidb(roidb, box_list):
         if len(gt_inds) > 0:
             gt_boxes = entry['boxes'][gt_inds, :]
             gt_classes = entry['gt_classes'][gt_inds]
-            gt_cats = entry['gt_cats'][gt_inds]
+            #gt_cats = entry['gt_cats'][gt_inds]
             proposal_to_gt_overlaps = box_utils.bbox_overlaps(
                 boxes.astype(dtype=np.float32, copy=False),
                 gt_boxes.astype(dtype=np.float32, copy=False)
@@ -527,10 +526,10 @@ def _merge_proposal_boxes_into_roidb(roidb, box_list):
             entry['gt_classes'],
             np.zeros((num_boxes), dtype=entry['gt_classes'].dtype)
         )
-        entry['gt_cats'] = np.append(
-            entry['gt_cats'],
-            np.zeros((num_boxes), dtype=entry['gt_cats'].dtype)
-        )
+        #entry['gt_cats'] = np.append(
+        #    entry['gt_cats'],
+        #    np.zeros((num_boxes), dtype=entry['gt_cats'].dtype)
+        #)
         entry['seg_areas'] = np.append(
             entry['seg_areas'],
             np.zeros((num_boxes), dtype=entry['seg_areas'].dtype)

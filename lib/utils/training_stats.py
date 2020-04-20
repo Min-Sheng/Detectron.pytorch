@@ -180,7 +180,7 @@ class TrainingStats(object):
             log_stats(stats, self.misc_args)
             if self.tblogger:
                 self.tb_log_stats(stats, cur_iter)
-                self.tblogger._add_images(cur_iter, input_data, shot)
+                #self.tblogger._add_images(cur_iter, input_data, shot)
 
     def tb_log_stats(self, stats, cur_iter):
         """Log the tracked statistics to tensorboard"""

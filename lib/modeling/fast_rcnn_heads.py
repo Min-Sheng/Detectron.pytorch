@@ -7,7 +7,7 @@ from torch.autograd import Variable
 from core.config import cfg
 import nn as mynn
 import utils.net as net_utils
-
+import numpy as np
 
 class fast_rcnn_outputs(nn.Module):
     def __init__(self, dim_in):
@@ -104,17 +104,23 @@ class fast_rcnn_outputs_co(nn.Module):
         return cls_score, bbox_pred
 
 def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
-                     bbox_inside_weights, bbox_outside_weights, use_marginloss=True):
+                     bbox_inside_weights, bbox_outside_weights, query_type, use_marginloss=False):
     device_id = cls_score.get_device()
-    rois_label = Variable(torch.from_numpy(label_int32.astype('int64'))).cuda(device_id)
+    if query_type == 1:
+        rois_label = Variable(torch.from_numpy(label_int32.astype('int64'))).cuda(device_id)
+    else:
+        rois_label = Variable(torch.from_numpy(np.zeros_like(label_int32).astype('int64'))).cuda(device_id)
     loss_cls = F.cross_entropy(cls_score, rois_label)
 
-    bbox_targets = Variable(torch.from_numpy(bbox_targets)).cuda(device_id)
-    bbox_inside_weights = Variable(torch.from_numpy(bbox_inside_weights)).cuda(device_id)
-    bbox_outside_weights = Variable(torch.from_numpy(bbox_outside_weights)).cuda(device_id)
-    loss_bbox = net_utils.smooth_l1_loss(
-        bbox_pred, bbox_targets, bbox_inside_weights, bbox_outside_weights)
-
+    if query_type == 1:
+        bbox_targets = Variable(torch.from_numpy(bbox_targets)).cuda(device_id)
+        bbox_inside_weights = Variable(torch.from_numpy(bbox_inside_weights)).cuda(device_id)
+        bbox_outside_weights = Variable(torch.from_numpy(bbox_outside_weights)).cuda(device_id)
+        loss_bbox = net_utils.smooth_l1_loss(
+            bbox_pred, bbox_targets, bbox_inside_weights, bbox_outside_weights)
+    else:
+        loss_bbox = Variable(torch.tensor(0).float()).cuda(device_id)
+    
     # class accuracy
     cls_preds = cls_score.max(dim=1)[1].type_as(rois_label)
     accuracy_cls = cls_preds.eq(rois_label).float().mean(dim=0)
@@ -134,7 +140,7 @@ def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
         return loss_cls, loss_bbox, accuracy_cls, margin_loss
 
     else:
-        return loss_cls, loss_bbox, accuracy_cls
+        return loss_cls, loss_bbox, accuracy_cls, None
 
 
 # ---------------------------------------------------------------------------- #

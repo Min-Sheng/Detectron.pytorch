@@ -84,7 +84,7 @@ def combined_roidb(dataset_names, training=True):
         
             roidb = filter_for_training(roidb)
             logger.info('Computing image aspect ratios and ordering the ratios...')
-            ratio_list, ratio_index = rank_for_training(roidb)
+            ratio_list, ratio_index, cat_list = rank_for_training(roidb, reserved)
             logger.info('done')
         else:
             ratio_list, ratio_index = None, None
@@ -98,11 +98,8 @@ def combined_roidb(dataset_names, training=True):
     logger.info('done')
 
     _compute_and_log_stats(roidb)
-
-    if training:
-        return imdb, roidb, ratio_list, ratio_index, query
-    else:
-        return imdb, roidb, ratio_list, ratio_index, query, cat_list
+    
+    return imdb, roidb, ratio_list, ratio_index, query, cat_list
 
 
 def extend_with_flipped_entries(roidb, dataset):
@@ -167,7 +164,7 @@ def filter_for_training(roidb):
     return filtered_roidb
 
 
-def rank_for_training(roidb):
+def rank_for_training(roidb, reserved):
     """Rank the roidb entries according to image aspect ration and mark for cropping
     for efficient batching if image is too long.
     Returns:
@@ -180,7 +177,9 @@ def rank_for_training(roidb):
     need_crop_cnt = 0
 
     ratio_list = []
-    for entry in roidb:
+    cat_list = [] # category list reserved
+
+    for i, entry in enumerate(roidb):
         width = entry['width']
         height = entry['height']
         ratio = width / float(height)
@@ -200,13 +199,17 @@ def rank_for_training(roidb):
             entry['need_crop'] = False
 
         ratio_list.append(ratio)
+        for j in np.unique(entry['gt_cats']):
+            if j in reserved:
+                cat_list.append(j)
 
     if cfg.TRAIN.ASPECT_CROPPING:
         logging.info('Number of entries that need to be cropped: %d. Ratio bound: [%.2f, %.2f]',
                      need_crop_cnt, RATIO_LO, RATIO_HI)
     ratio_list = np.array(ratio_list)
+    cat_list = np.array(cat_list)
     ratio_index = np.argsort(ratio_list)
-    return ratio_list[ratio_index], ratio_index
+    return ratio_list[ratio_index], ratio_index, cat_list[ratio_index]
 
 def test_rank_roidb_ratio(roidb, reserved):
     # rank roidb based on the ratio between width and height.

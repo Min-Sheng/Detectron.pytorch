@@ -159,7 +159,7 @@ def main():
 
     if args.dataset == "fss_cell":
         cfg.TRAIN.DATASETS = ('fss_cell_train_val',)
-        cfg.MODEL.NUM_CLASSES = 14
+        cfg.MODEL.NUM_CLASSES = 2
     elif args.dataset == "coco2017":
         cfg.TRAIN.DATASETS = ('coco_2017_train',)
         cfg.MODEL.NUM_CLASSES = 81
@@ -223,7 +223,7 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(
+    imdb, roidb, ratio_list, ratio_index, query, cat_list = combined_roidb(
         cfg.TRAIN.DATASETS, True)
     timers['roidb'].toc()
     train_size = len(roidb)
@@ -234,7 +234,7 @@ def main():
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
-        training=True, shot=args.shot)
+        training=True, cat_list=cat_list, shot=args.shot)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -407,7 +407,7 @@ def log_training_stats(training_stats, global_step, lr, input_data, shot):
     log_stats(stats, training_stats.misc_args)
     if training_stats.tblogger:
         training_stats.tb_log_stats(stats, global_step)
-        #training_stats.tblogger._add_images(global_step, input_data, shot)
+        training_stats.tblogger._add_images(global_step, input_data, shot)
 
 
 if __name__ == '__main__':

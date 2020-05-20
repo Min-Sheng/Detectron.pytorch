@@ -6,6 +6,7 @@ from core.config import cfg
 import roi_data.data_utils as data_utils
 import utils.blob as blob_utils
 import utils.boxes as box_utils
+import utils.segms as segm_utils
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,9 @@ def add_rpn_blobs(blobs, im_scales, roidb):
         all_anchors = foa.field_of_anchors
 
     for im_i, entry in enumerate(roidb):
+        segms = [segm[0] for segm in entry['segms']]
+        mask = segm_utils.polys_to_mask(segms, entry['height'], entry['width'])
+        blobs['binary_mask'] = mask
         scale = im_scales[im_i]
         im_height = np.round(entry['height'] * scale)
         im_width = np.round(entry['width'] * scale)
@@ -97,7 +101,7 @@ def add_rpn_blobs(blobs, im_scales, roidb):
 
     valid_keys = [
         'has_visible_keypoints', 'boxes', 'segms', 'seg_areas', 'gt_classes',
-        'gt_overlaps', 'is_crowd', 'box_to_gt_ind_map', 'gt_keypoints'
+        'gt_overlaps', 'is_crowd', 'box_to_gt_ind_map', 'gt_keypoints', 'gt_cats', 'binary_mask'
     ]
     minimal_roidb = [{} for _ in range(len(roidb))]
     for i, e in enumerate(roidb):

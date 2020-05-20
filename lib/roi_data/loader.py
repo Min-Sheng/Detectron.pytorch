@@ -44,35 +44,65 @@ class RoiDataLoader(data.Dataset):
 
         # Squeeze batch dim
         for key in blobs:
-            if key != 'roidb'  and key != 'gt_cats':
+            if key != 'roidb'  and key != 'gt_cats' and key != 'binary_mask':
                 blobs[key] = blobs[key].squeeze(axis=0)
 
         blobs['gt_cats'] = [x for x in blobs['gt_cats'] if x in self.list]
         blobs['gt_cats'] = np.array(blobs['gt_cats'])
 
+        scale = blobs['im_info'][-1]
+        mask = cv2.resize(blobs['binary_mask'], None, None, fx = scale, fy = scale, interpolation = cv2.INTER_NEAREST)
+        kernel = np.ones((5,5), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations = 1)
+        blobs['binary_mask'] = mask
+
         if self.training:
             # Random choice query catgory
-            catgory = blobs['gt_cats']
-            cand = np.unique(catgory)
-            if len(cand)==1:
-                choice = cand[0]
+            positive_catgory = blobs['gt_cats']
+            negative_catgory = np.array(list(set(self.cat_list) - set(positive_catgory)))
+
+            r = random.random()
+            if r < 0.5:
+                query_type = 1
+                cand = np.unique(positive_catgory)
+                if len(cand)==1:
+                    choice = cand[0]
+                else:
+                    p = []
+                    for i in cand:
+                        p.append(self.show_time[i])
+                    p = np.array(p)
+                    p /= p.sum()
+                    choice  = np.random.choice(cand,1,p=p)[0]
+                query = self.load_query(choice)
+            elif r >= 0.5 and r < 0.75:
+                query_type = 0
+                im = blobs['data'].copy()
+                binary_mask = blobs['binary_mask'].copy()
+                patch = self.sample_bg(im, binary_mask)
+                if len(patch) == self.shot:
+                    query = patch
+                else:
+                    query_type = 0
+                    cand = negative_catgory
+                    choice  = np.random.choice(cand,1)[0]
+                    query = self.load_query(choice)
             else:
-                p = []
-                for i in cand:
-                    p.append(self.show_time[i])
-                p = np.array(p)
-                p /= p.sum()
-                choice  = np.random.choice(cand,1,p=p)[0]
-            
-            # Get query image
-            query = self.load_query(choice)
+                query_type = 0
+                cand = negative_catgory
+                choice  = np.random.choice(cand,1)[0]
+                query = self.load_query(choice)
+
         else:
             query = self.load_query(index, single_db[0]['id'])
 
         blobs['query'] = query
+        blobs['query_type'] = query_type
 
         if 'gt_cats' in blobs: 
             del blobs['gt_cats']
+        if 'binary_mask' in blobs: 
+            del blobs['binary_mask']
             
         if self.training:
             if self._roidb[index]['need_crop']:
@@ -97,6 +127,27 @@ class RoiDataLoader(data.Dataset):
             choice = self.cat_list[index]
             blobs['choice'] = choice
             return blobs
+
+    def sample_bg(self, im, mask, patch_size=64, T=10000):
+        _, height, width = im.shape
+        t = 0
+        n = 0
+        patches = []
+        while n < self.shot and t < T:
+            random_height = np.random.randint(0, height - patch_size - 1)
+            random_width = np.random.randint(0, width - patch_size - 1)
+            im_patch = im[:, random_height:random_height+patch_size, random_width:random_width+patch_size]
+            mask_patch = mask[random_height:random_height+patch_size, random_width:random_width+patch_size].astype(np.bool)
+            if np.count_nonzero(~mask_patch):
+                im_patch = im_patch.transpose((1, 2, 0))
+                if random.randint(0,99)/100 > 0.5:
+                    im_patch = im_patch[:, ::-1, :]
+                if patch_size > 64:
+                    im_patch = cv2.resize(im_patch, (64, 64), interpolation=cv2.INTER_LINEAR)
+                patches.append(im_patch.transpose((2, 0, 1)).copy())
+                n = n + 1
+            t = t + 1
+        return patches
 
     def crop_data(self, blobs, ratio):
         data_height, data_width = map(int, blobs['im_info'][:2])
@@ -160,7 +211,7 @@ class RoiDataLoader(data.Dataset):
             blobs['roidb'][0]['boxes'] = boxes
 
     def load_query(self, choice, id=0):
-    
+        
         if self.training:
             # Random choice query catgory image
             all_data = self._query[choice]
@@ -201,7 +252,7 @@ class RoiDataLoader(data.Dataset):
                 im = im[:, ::-1, :]
 
 
-            im, im_scale = blob_utils.prep_im_for_blob(im,  cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
+            im, _ = blob_utils.prep_im_for_blob(im,  cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
             
             query.append(blob_utils.im_list_to_blob(im).squeeze(0))
 

@@ -169,7 +169,7 @@ def main():
     else:
         raise ValueError("Unexpected args.dataset: {}".format(args.dataset))
 
-    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-C4_1x_{}.yaml".format(args.group)
+    args.cfg_file = "configs/few_shot/e2e_mask_rcnn_R-50-FPN_1x_{}.yaml".format(args.group)
     cfg_from_file(args.cfg_file)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
@@ -239,7 +239,8 @@ def main():
 
     ### Dataset ###
     timers['roidb'].tic()
-    imdb, roidb, ratio_list, ratio_index, query = combined_roidb(cfg.TRAIN.DATASETS, True)
+    imdb, roidb, ratio_list, ratio_index, query, cat_list = combined_roidb(
+        cfg.TRAIN.DATASETS, True)    
     timers['roidb'].toc()
     roidb_size = len(roidb)
     logger.info('{:d} roidb entries'.format(roidb_size))
@@ -256,7 +257,7 @@ def main():
     dataset = RoiDataLoader(
         roidb, ratio_list, ratio_index, query, 
         cfg.MODEL.NUM_CLASSES,
-        training=True, shot=args.shot)
+        training=True, cat_list=cat_list, shot=args.shot)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_sampler=batchSampler,

@@ -135,7 +135,31 @@ def prep_im_for_blob(im, pixel_means, target_sizes, max_size):
         ims.append(im_resized)
         im_scales.append(im_scale)
     return ims, im_scales
+
+def prep_query_for_blob(im, pixel_means, target_size):
+    """Prepare an image for use as a network input blob. Specially:
+      - Subtract per-channel pixel mean
+      - Convert to float32
+      - Rescale to each of the specified target size (capped at max_size)
+    Returns a list of transformed images, one for each target size. Also returns
+    the scale factors that were used to compute each returned image.
+    """
+    im = im.astype(np.float32, copy=False)
+    # changed to use pytorch models
+    im /= 255. # Convert range to [0,1]
+    # normalization for pytroch pretrained models.
+    # https://pytorch.org/docs/stable/torchvision/models.html
+    pixel_means = [0.485, 0.456, 0.406]
+    pixel_stdens = [0.229, 0.224, 0.225]
     
+    # normalize manual
+    im -= pixel_means # Minus mean    
+    im /= pixel_stdens # divide by stddev
+
+    # im = im[:, :, ::-1]
+    im_resized = cv2.resize(im, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+    return im_resized
+
 def get_im_blob_sizes(im_shape, target_sizes, max_size):
     """Calculate im blob size for multiple target_sizes given original im shape
     """

@@ -13,6 +13,7 @@ from modeling.generate_anchors import generate_anchors
 from modeling.generate_proposals import GenerateProposalsOp
 from modeling.collect_and_distribute_fpn_rpn_proposals import CollectAndDistributeFpnRpnProposalsOp
 import nn as mynn
+from torch.autograd import Variable
 
 # Lowest and highest pyramid levels in the backbone network. For FPN, we assume
 # that all networks have 5 spatial reductions, each by a factor of 2. Level 1
@@ -421,13 +422,18 @@ class fpn_rpn_outputs(nn.Module):
 
 def fpn_rpn_losses(**kwargs):
     """Add RPN on FPN specific losses."""
+    query_type = kwargs['query_type']
     losses_cls = []
     losses_bbox = []
     for lvl in range(cfg.FPN.RPN_MIN_LEVEL, cfg.FPN.RPN_MAX_LEVEL + 1):
         slvl = str(lvl)
         # Spatially narrow the full-sized RPN label arrays to match the feature map shape
+        device_id =  kwargs['rpn_cls_logits_fpn' + slvl].get_device()
         b, c, h, w = kwargs['rpn_cls_logits_fpn' + slvl].shape
-        rpn_labels_int32_fpn = kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w]
+        if query_type == 1:
+            rpn_labels_int32_fpn = kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w]
+        else:
+            rpn_labels_int32_fpn = Variable(torch.full_like(kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w], 0.)).cuda(device_id)
         h, w = kwargs['rpn_bbox_pred_fpn' + slvl].shape[2:]
         rpn_bbox_targets_fpn = kwargs['rpn_bbox_targets_wide_fpn' + slvl][:, :, :h, :w]
         rpn_bbox_inside_weights_fpn = kwargs[
@@ -452,10 +458,13 @@ def fpn_rpn_losses(**kwargs):
         # Normalization by (1) RPN_BATCH_SIZE_PER_IM and (2) IMS_PER_BATCH is
         # handled by (1) setting bbox outside weights and (2) SmoothL1Loss
         # normalizes by IMS_PER_BATCH
-        loss_rpn_bbox_fpn = net_utils.smooth_l1_loss(
-            kwargs['rpn_bbox_pred_fpn' + slvl], rpn_bbox_targets_fpn,
-            rpn_bbox_inside_weights_fpn, rpn_bbox_outside_weights_fpn,
-            beta=1/9)
+        if query_type == 1:
+            loss_rpn_bbox_fpn = net_utils.smooth_l1_loss(
+                kwargs['rpn_bbox_pred_fpn' + slvl], rpn_bbox_targets_fpn,
+                rpn_bbox_inside_weights_fpn, rpn_bbox_outside_weights_fpn,
+                beta=1/9)
+        else:
+            loss_rpn_bbox_fpn = Variable(torch.tensor(0).float()).cuda(device_id)
 
         losses_cls.append(loss_rpn_cls_fpn)
         losses_bbox.append(loss_rpn_bbox_fpn)

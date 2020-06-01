@@ -62,7 +62,7 @@ class RoiDataLoader(data.Dataset):
             negative_catgory = np.array(list(set(self.cat_list) - set(positive_catgory)))
 
             r = random.random()
-            if r < 0.5:
+            if r < 0.7:
                 query_type = 1
                 cand = np.unique(positive_catgory)
                 if len(cand)==1:
@@ -75,7 +75,7 @@ class RoiDataLoader(data.Dataset):
                     p /= p.sum()
                     choice  = np.random.choice(cand,1,p=p)[0]
                 query = self.load_query(choice)
-            elif r >= 0.5 and r < 0.75:
+            elif r >= 0.7 and r < 0.9:
                 query_type = 0
                 im = blobs['data'].copy()
                 binary_mask = blobs['binary_mask'].copy()
@@ -128,7 +128,7 @@ class RoiDataLoader(data.Dataset):
             blobs['choice'] = choice
             return blobs
 
-    def sample_bg(self, im, mask, patch_size=64, T=10000):
+    def sample_bg(self, im, mask, patch_size=128, T=10000):
         _, height, width = im.shape
         t = 0
         n = 0
@@ -210,7 +210,7 @@ class RoiDataLoader(data.Dataset):
             np.clip(boxes[:, 2], 0, size_crop - 1, out=boxes[:, 2])
             blobs['roidb'][0]['boxes'] = boxes
 
-    def load_query(self, choice, id=0):
+    def load_query(self, choice, id=0, aug=True):
         
         if self.training:
             # Random choice query catgory image
@@ -244,16 +244,30 @@ class RoiDataLoader(data.Dataset):
                 im = im[:,:,np.newaxis]
                 im = np.concatenate((im,im,im), axis=2)
 
+            if self.training and aug:
+                def box_aug(q_h, q_w, x1, y1, x2, y2, p=0.35):
+                    h, w = y2 - y1, x2 - x1
+                    cty, ctx = h / 2 + y1, w / 2 + x1
+                    new_h = (1 + np.random.rand() * p) * h
+                    new_w = (1 + np.random.rand() * p) * w
+                    #new_h = (1 + p) * h
+                    #new_w = (1 + p) * w
+                    new_x1, new_x2 = max(0, ctx - new_w / 2), min(q_w - 1, ctx + new_w / 2)
+                    new_y1, new_y2 = max(0, cty - new_h / 2), min(q_h - 1, cty + new_h / 2)
+                    return  new_x1, new_y1, new_x2, new_y2
+                q_h, q_w, q_c = im.shape
+                x1, y1, x2, y2 = data['boxes']
+                data['boxes'] = box_aug(q_h, q_w, x1, y1, x2, y2, p=0.5)
+                
             im = blob_utils.crop(im, data['boxes'], cfg.TRAIN.QUERY_SIZE)
             # flip the channel, since the original one using cv2
             # rgb -> bgr
             # im = im[:,:,::-1]
             if random.randint(0,99)/100 > 0.5 and self.training:
                 im = im[:, ::-1, :]
-
-
-            im, _ = blob_utils.prep_im_for_blob(im,  cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
-            
+                        
+            im, im_scale = blob_utils.prep_im_for_blob(im, cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE],
+                        cfg.TRAIN.MAX_SIZE)
             query.append(blob_utils.im_list_to_blob(im).squeeze(0))
 
         return query
@@ -287,8 +301,8 @@ class RoiDataLoader(data.Dataset):
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
             # Group number to class
-            if len(self.list)==2:
-                self.list =list(folds[self.list['all']])
+            if len(self.list)==0:
+                self.list = list(folds['all'])
 
     def probability(self):
         show_time = {}

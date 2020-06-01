@@ -104,18 +104,24 @@ class fast_rcnn_outputs_co(nn.Module):
         return cls_score, bbox_pred
 
 def fast_rcnn_losses(cls_score, bbox_pred, label_int32, bbox_targets,
-                     bbox_inside_weights, bbox_outside_weights, query_type, use_marginloss=False):
+                     bbox_inside_weights, bbox_outside_weights, rois, query_type, use_marginloss=False):
     device_id = cls_score.get_device()
-    if query_type == 1:
-        rois_label = Variable(torch.from_numpy(label_int32.astype('int64'))).cuda(device_id)
-    else:
-        rois_label = Variable(torch.from_numpy(np.zeros_like(label_int32).astype('int64'))).cuda(device_id)
+    rois = Variable(torch.from_numpy(rois[:,0].astype('int64'))).cuda(device_id)
+    rois_label = Variable(torch.from_numpy(label_int32.astype('int64'))).cuda(device_id)
+    query_type_expanded = query_type[rois]
+    rois_label = rois_label * query_type_expanded
     loss_cls = F.cross_entropy(cls_score, rois_label)
 
-    if query_type == 1:
-        bbox_targets = Variable(torch.from_numpy(bbox_targets)).cuda(device_id)
-        bbox_inside_weights = Variable(torch.from_numpy(bbox_inside_weights)).cuda(device_id)
-        bbox_outside_weights = Variable(torch.from_numpy(bbox_outside_weights)).cuda(device_id)
+    bbox_targets = Variable(torch.from_numpy(bbox_targets)).cuda(device_id)
+    bbox_inside_weights = Variable(torch.from_numpy(bbox_inside_weights)).cuda(device_id)
+    bbox_outside_weights = Variable(torch.from_numpy(bbox_outside_weights)).cuda(device_id)
+
+    bbox_pred = bbox_pred[query_type_expanded==1]
+    bbox_targets = bbox_targets[query_type_expanded==1]
+    bbox_inside_weights = bbox_inside_weights[query_type_expanded==1]
+    bbox_outside_weights = bbox_outside_weights[query_type_expanded==1]
+
+    if len(bbox_pred) > 0:
         loss_bbox = net_utils.smooth_l1_loss(
             bbox_pred, bbox_targets, bbox_inside_weights, bbox_outside_weights)
     else:

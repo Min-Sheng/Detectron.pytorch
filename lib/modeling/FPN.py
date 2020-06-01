@@ -422,7 +422,7 @@ class fpn_rpn_outputs(nn.Module):
 
 def fpn_rpn_losses(**kwargs):
     """Add RPN on FPN specific losses."""
-    query_type = kwargs['query_type']
+    query_type = kwargs['query_type'].int()
     losses_cls = []
     losses_bbox = []
     for lvl in range(cfg.FPN.RPN_MIN_LEVEL, cfg.FPN.RPN_MAX_LEVEL + 1):
@@ -430,10 +430,7 @@ def fpn_rpn_losses(**kwargs):
         # Spatially narrow the full-sized RPN label arrays to match the feature map shape
         device_id =  kwargs['rpn_cls_logits_fpn' + slvl].get_device()
         b, c, h, w = kwargs['rpn_cls_logits_fpn' + slvl].shape
-        if query_type == 1:
-            rpn_labels_int32_fpn = kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w]
-        else:
-            rpn_labels_int32_fpn = Variable(torch.full_like(kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w], 0.)).cuda(device_id)
+        rpn_labels_int32_fpn = kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w] * query_type[:, None, None, None]
         h, w = kwargs['rpn_bbox_pred_fpn' + slvl].shape[2:]
         rpn_bbox_targets_fpn = kwargs['rpn_bbox_targets_wide_fpn' + slvl][:, :, :h, :w]
         rpn_bbox_inside_weights_fpn = kwargs[
@@ -458,7 +455,11 @@ def fpn_rpn_losses(**kwargs):
         # Normalization by (1) RPN_BATCH_SIZE_PER_IM and (2) IMS_PER_BATCH is
         # handled by (1) setting bbox outside weights and (2) SmoothL1Loss
         # normalizes by IMS_PER_BATCH
-        if query_type == 1:
+        kwargs['rpn_bbox_pred_fpn' + slvl] = kwargs['rpn_bbox_pred_fpn' + slvl][query_type==1]
+        rpn_bbox_targets_fpn = rpn_bbox_targets_fpn[query_type==1]
+        rpn_bbox_inside_weights_fpn = rpn_bbox_inside_weights_fpn[query_type==1]
+        rpn_bbox_outside_weights_fpn = rpn_bbox_outside_weights_fpn[query_type==1]
+        if len(kwargs['rpn_bbox_pred_fpn' + slvl]) > 0:
             loss_rpn_bbox_fpn = net_utils.smooth_l1_loss(
                 kwargs['rpn_bbox_pred_fpn' + slvl], rpn_bbox_targets_fpn,
                 rpn_bbox_inside_weights_fpn, rpn_bbox_outside_weights_fpn,

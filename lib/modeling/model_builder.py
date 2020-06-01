@@ -157,7 +157,8 @@ class Generalized_RCNN(nn.Module):
 
     def _forward(self, data, query, im_info, query_type, roidb=None, **rpn_kwargs):
 
-        query_type = query_type.item()
+        #query_type = query_type.item()
+
         im_data = data
         if self.training:
             roidb = list(map(lambda x: blob_utils.deserialize(x)[0], roidb))
@@ -247,7 +248,7 @@ class Generalized_RCNN(nn.Module):
                 (k, rpn_ret[k]) for k in rpn_ret.keys()
                 if (k.startswith('rpn_cls_logits') or k.startswith('rpn_bbox_pred'))
             ))
-            rpn_kwargs.update({'query_type': query_type})
+            #rpn_kwargs.update({'query_type': query_type})
             loss_rpn_cls, loss_rpn_bbox = rpn_heads.generic_rpn_losses(**rpn_kwargs)
             if cfg.FPN.FPN_ON:
                 for i, lvl in enumerate(range(cfg.FPN.RPN_MIN_LEVEL, cfg.FPN.RPN_MAX_LEVEL + 1)):
@@ -260,7 +261,7 @@ class Generalized_RCNN(nn.Module):
             # bbox loss
             loss_cls, loss_bbox, accuracy_cls, _ = fast_rcnn_heads.fast_rcnn_losses(
                 cls_score, bbox_pred, rpn_ret['labels_int32'], rpn_ret['bbox_targets'],
-                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], query_type, use_marginloss=False)
+                rpn_ret['bbox_inside_weights'], rpn_ret['bbox_outside_weights'], rpn_ret['rois'], query_type, use_marginloss=False)
             #return_dict['losses']['margin_loss'] = margin_loss
             return_dict['losses']['loss_cls'] = loss_cls
             return_dict['losses']['loss_bbox'] = loss_bbox
@@ -275,7 +276,7 @@ class Generalized_RCNN(nn.Module):
                 mask_pred = self.Mask_Outs(mask_feat)
                 # return_dict['mask_pred'] = mask_pred
                 # mask loss
-                loss_mask = mask_rcnn_heads.mask_rcnn_losses(mask_pred, rpn_ret['masks_int32'], query_type)
+                loss_mask = mask_rcnn_heads.mask_rcnn_losses(mask_pred, rpn_ret['masks_int32'], rpn_ret['mask_rois'], query_type)
                 return_dict['losses']['loss_mask'] = loss_mask
 
             if cfg.MODEL.KEYPOINTS_ON:

@@ -2,7 +2,7 @@ import numpy as np
 from torch import nn
 
 from core.config import cfg
-from datasets import json_dataset
+from datasets import fss_cell
 import roi_data.fast_rcnn
 import utils.blob as blob_utils
 import utils.fpn as fpn_utils
@@ -55,7 +55,7 @@ class CollectAndDistributeFpnRpnProposalsOp(nn.Module):
             # implementation we are *not* filtering crowd proposals.
             # This choice should be investigated in the future (it likely does
             # not matter).
-            json_dataset.add_proposals(roidb, rois, im_scales, crowd_thresh=0)
+            fss_cell.add_proposals(roidb, rois, im_scales, crowd_thresh=0)
             # Compute training labels for the RPN proposals; also handles
             # distributing the proposals over FPN levels
             output_blob_names = roi_data.fast_rcnn.get_fast_rcnn_blob_names()

@@ -35,6 +35,7 @@ from pycocotools import mask as COCOmask
 from pycocotools.coco import COCO
 
 import utils.boxes as box_utils
+import utils.segms as segm_utils
 from core.config import cfg
 from utils.timer import Timer
 from .dataset_catalog import ANN_FN
@@ -248,7 +249,6 @@ class JsonDataset(object):
             # Require non-zero seg area and more than 1x1 box size
             if obj['area'] > 0 and x2 > x1 and y2 > y1:
                 obj['clean_bbox'] = [x1, y1, x2, y2]
-                valid_objs.append(obj)
                 # Compress the rle
                 if 'counts' in obj['segmentation'] and type(obj['segmentation']['counts']) == list:
                     # Magic RLE format handling painfully discovered by looking at the
@@ -256,7 +256,11 @@ class JsonDataset(object):
                     rle = mask_util.frPyObjects(obj['segmentation'], height, width)
                     valid_segms.append(rle)
                 else:
+                    binary_mask = segm_utils.polys_to_mask(obj['segmentation'], height, width)
+                    if len(np.unique(binary_mask))==1:
+                        continue
                     valid_segms.append(obj['segmentation'])
+                valid_objs.append(obj)
                 query = {
                         'boxes': obj['clean_bbox'],
                         'segms': valid_segms,
@@ -445,9 +449,8 @@ class JsonDataset(object):
         elif cfg.SEEN==3:
             self.list = cfg.TRAIN.CATEGORIES + cfg.TEST.CATEGORIES
             # Group number to class
-            if len(self.list)==2:
-                self.list =list(folds[self.list['all']])
-
+            if len(self.list)==0:
+                self.list = list(folds['all'])
         self.inverse_list = self.list
         # Which index need to be remove
         all_index = list(range(len(self.image_index)))
@@ -502,7 +505,7 @@ def _merge_proposal_boxes_into_roidb(roidb, box_list):
         if len(gt_inds) > 0:
             gt_boxes = entry['boxes'][gt_inds, :]
             gt_classes = entry['gt_classes'][gt_inds]
-            #gt_cats = entry['gt_cats'][gt_inds]
+            gt_cats = entry['gt_cats'][gt_inds]
             proposal_to_gt_overlaps = box_utils.bbox_overlaps(
                 boxes.astype(dtype=np.float32, copy=False),
                 gt_boxes.astype(dtype=np.float32, copy=False)
@@ -526,10 +529,10 @@ def _merge_proposal_boxes_into_roidb(roidb, box_list):
             entry['gt_classes'],
             np.zeros((num_boxes), dtype=entry['gt_classes'].dtype)
         )
-        #entry['gt_cats'] = np.append(
-        #    entry['gt_cats'],
-        #    np.zeros((num_boxes), dtype=entry['gt_cats'].dtype)
-        #)
+        entry['gt_cats'] = np.append(
+            entry['gt_cats'],
+            np.zeros((num_boxes), dtype=entry['gt_cats'].dtype)
+        )
         entry['seg_areas'] = np.append(
             entry['seg_areas'],
             np.zeros((num_boxes), dtype=entry['seg_areas'].dtype)

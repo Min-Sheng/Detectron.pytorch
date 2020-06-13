@@ -48,6 +48,9 @@ __C.TRAIN.CATEGORIES = [1]
 # each training image (i.e., scale jitter data augmentation)
 __C.TRAIN.SCALES = (600, )
 __C.TRAIN.QUERY_SIZE = 64
+__C.TRAIN.QUERY_POSITIVE_RATE = 0.9
+__C.TRAIN.QUERY_GLOBAL_NEGATIVE_RATE = 0.05
+__C.TRAIN.QUERY_BOX_AUG = 0.35
 
 # Max pixel size of the longest side of a scaled input image
 __C.TRAIN.MAX_SIZE = 1000
@@ -152,6 +155,14 @@ __C.TRAIN.RPN_STRADDLE_THRESH = 0
 # Proposal height and width both need to be greater than RPN_MIN_SIZE
 # (at orig image scale; not scale used during training or inference)
 __C.TRAIN.RPN_MIN_SIZE = 0
+
+__C.TRAIN.RPN_SPATIALLY_REGULARIZED = False
+# Gaussain kernl size is better in odd number.
+__C.TRAIN.RPN_GAUSSIAN_KERNEL_SIZE = 255
+# Gaussain kernel
+__C.TRAIN.RPN_GAUSSIAN_WEIGHTS = []
+# Gaussain wieght normalized values
+__C.TRAIN.RPN_GAUSSIAN_WEIGHTS_NORMALIZED_VALUE = []
 
 # Filter proposals that are inside of crowd regions by CROWD_FILTER_THRESH
 # "Inside" is measured as: proposal-with-crowd intersection area divided by

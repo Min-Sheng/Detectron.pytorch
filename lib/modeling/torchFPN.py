@@ -429,6 +429,8 @@ def fpn_rpn_losses(**kwargs):
         # Spatially narrow the full-sized RPN label arrays to match the feature map shape
         b, c, h, w = kwargs['rpn_cls_logits_fpn' + slvl].shape
         rpn_labels_int32_fpn = kwargs['rpn_labels_int32_wide_fpn' + slvl][:, :, :h, :w]
+        if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+            rpn_cls_score_weights_fpn = kwargs['rpn_cls_score_weights_wide_fpn' + slvl][:, :, :h, :w]
         h, w = kwargs['rpn_bbox_pred_fpn' + slvl].shape[2:]
         rpn_bbox_targets_fpn = kwargs['rpn_bbox_targets_wide_fpn' + slvl][:, :, :h, :w]
         rpn_bbox_inside_weights_fpn = kwargs[
@@ -444,11 +446,18 @@ def fpn_rpn_losses(**kwargs):
             loss_rpn_cls_fpn = F.cross_entropy(
                 rpn_cls_logits_fpn, rpn_labels_int32_fpn, ignore_index=-1)
         else:  # sigmoid
-            weight = (rpn_labels_int32_fpn >= 0).float()
-            loss_rpn_cls_fpn = F.binary_cross_entropy_with_logits(
-                kwargs['rpn_cls_logits_fpn' + slvl], rpn_labels_int32_fpn.float(), weight,
-                size_average=False)
-            loss_rpn_cls_fpn /= cfg.TRAIN.RPN_BATCH_SIZE_PER_IM * cfg.TRAIN.IMS_PER_BATCH
+            if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+                weight = (rpn_labels_int32_fpn >= 0).float() * rpn_cls_score_weights_fpn
+                loss_rpn_cls_fpn = F.binary_cross_entropy_with_logits(
+                    kwargs['rpn_cls_logits_fpn' + slvl], rpn_labels_int32_fpn.float(), weight,
+                    size_average=False)
+                loss_rpn_cls_fpn /= cfg.TRAIN.RPN_BATCH_SIZE_PER_IM * cfg.TRAIN.IMS_PER_BATCH
+            else:
+                weight = (rpn_labels_int32_fpn >= 0).float()
+                loss_rpn_cls_fpn = F.binary_cross_entropy_with_logits(
+                    kwargs['rpn_cls_logits_fpn' + slvl], rpn_labels_int32_fpn.float(), weight,
+                    size_average=False)
+                loss_rpn_cls_fpn /= cfg.TRAIN.RPN_BATCH_SIZE_PER_IM * cfg.TRAIN.IMS_PER_BATCH
 
         # Normalization by (1) RPN_BATCH_SIZE_PER_IM and (2) IMS_PER_BATCH is
         # handled by (1) setting bbox outside weights and (2) SmoothL1Loss
@@ -462,6 +471,7 @@ def fpn_rpn_losses(**kwargs):
         losses_bbox.append(loss_rpn_bbox_fpn)
 
     return losses_cls, losses_bbox
+
 
 
 # ---------------------------------------------------------------------------- #

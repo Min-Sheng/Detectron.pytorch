@@ -244,7 +244,7 @@ def main():
                 im_colored[:,:,2] = 0
                 im_colored = cv2.convertScaleAbs(im_colored, alpha=alpha, beta=beta)
             
-            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], catgory, num_cats, box_proposals, timers)
+            cls_boxes_i, cls_segms_i, cls_keyps_i = im_detect_all(model, im, input_data['query'], input_data['query_type'], catgory, num_cats, box_proposals, timers)
             im = im_colored
             extend_results(i, all_boxes, cls_boxes_i)
             if cls_segms_i is not None:

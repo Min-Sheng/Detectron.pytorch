@@ -7,6 +7,7 @@ import roi_data.data_utils as data_utils
 import utils.blob as blob_utils
 import utils.boxes as box_utils
 import utils.segms as segm_utils
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,16 @@ def get_rpn_blob_names(is_training=True):
         if cfg.FPN.FPN_ON and cfg.FPN.MULTILEVEL_RPN:
             # Same format as RPN blobs, but one per FPN level
             for lvl in range(cfg.FPN.RPN_MIN_LEVEL, cfg.FPN.RPN_MAX_LEVEL + 1):
-                blob_names += [
+                if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+                    blob_names += [
+                    'rpn_labels_int32_wide_fpn' + str(lvl),
+                    'rpn_bbox_targets_wide_fpn' + str(lvl),
+                    'rpn_bbox_inside_weights_wide_fpn' + str(lvl),
+                    'rpn_bbox_outside_weights_wide_fpn' + str(lvl),
+                    'rpn_cls_score_weights_wide_fpn' + str(lvl)
+                ]
+                else:
+                    blob_names += [
                     'rpn_labels_int32_wide_fpn' + str(lvl),
                     'rpn_bbox_targets_wide_fpn' + str(lvl),
                     'rpn_bbox_inside_weights_wide_fpn' + str(lvl),
@@ -29,12 +39,21 @@ def get_rpn_blob_names(is_training=True):
                 ]
         else:
             # Single level RPN blobs
-            blob_names += [
-                'rpn_labels_int32_wide',
-                'rpn_bbox_targets_wide',
-                'rpn_bbox_inside_weights_wide',
-                'rpn_bbox_outside_weights_wide'
-            ]
+            if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+                blob_names += [
+                    'rpn_labels_int32_wide',
+                    'rpn_bbox_targets_wide',
+                    'rpn_bbox_inside_weights_wide',
+                    'rpn_bbox_outside_weights_wide',
+                    'rpn_cls_score_weights_wide'
+                ]
+            else:
+                blob_names += [
+                    'rpn_labels_int32_wide',
+                    'rpn_bbox_targets_wide',
+                    'rpn_bbox_inside_weights_wide',
+                    'rpn_bbox_outside_weights_wide'
+                ]
     return blob_names
 
 
@@ -216,6 +235,18 @@ def _get_rpn_blobs(im_height, im_width, foas, all_anchors, gt_boxes):
     bbox_outside_weights[labels == 1, :] = 1.0 / num_examples
     bbox_outside_weights[labels == 0, :] = 1.0 / num_examples
 
+    #===========================================================
+    if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+        # cls_score_weights: value between [0, 1], 1 is no penalty. 
+
+        cls_score_weights = np.empty((num_inside, ), dtype=np.float32)
+        cls_score_weights.fill(1.0)
+
+        im_info = (im_height, im_width)
+        cls_score_weights = _calculateGaussianWeights(anchors, gt_boxes, cls_score_weights, labels, im_info)
+
+    #===========================================================
+
     # Map up to original set of anchors
     labels = data_utils.unmap(labels, total_anchors, inds_inside, fill=-1)
     bbox_targets = data_utils.unmap(
@@ -227,6 +258,8 @@ def _get_rpn_blobs(im_height, im_width, foas, all_anchors, gt_boxes):
     bbox_outside_weights = data_utils.unmap(
         bbox_outside_weights, total_anchors, inds_inside, fill=0
     )
+    if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+        cls_score_weights = data_utils.unmap(cls_score_weights, total_anchors, inds_inside, fill=1.0)
 
     # Split the generated labels, etc. into labels per each field of anchors
     blobs_out = []
@@ -240,6 +273,8 @@ def _get_rpn_blobs(im_height, im_width, foas, all_anchors, gt_boxes):
         _bbox_targets = bbox_targets[start_idx:end_idx, :]
         _bbox_inside_weights = bbox_inside_weights[start_idx:end_idx, :]
         _bbox_outside_weights = bbox_outside_weights[start_idx:end_idx, :]
+        if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+            _cls_score_weights = cls_score_weights[start_idx:end_idx]
         start_idx = end_idx
 
         # labels output with shape (1, A, height, width)
@@ -253,12 +288,194 @@ def _get_rpn_blobs(im_height, im_width, foas, all_anchors, gt_boxes):
         # bbox_outside_weights output with shape (1, 4 * A, height, width)
         _bbox_outside_weights = _bbox_outside_weights.reshape(
             (1, H, W, A * 4)).transpose(0, 3, 1, 2)
-        blobs_out.append(
-            dict(
-                rpn_labels_int32_wide=_labels,
-                rpn_bbox_targets_wide=_bbox_targets,
-                rpn_bbox_inside_weights_wide=_bbox_inside_weights,
-                rpn_bbox_outside_weights_wide=_bbox_outside_weights
+        if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+            # rpn_cls_score_weight output with shape (1, A, height, width)
+            _cls_score_weights = _cls_score_weights.reshape((1, H, W, A)).transpose(0, 3, 1, 2)
+
+        if cfg.TRAIN.RPN_SPATIALLY_REGULARIZED:
+            blobs_out.append(
+                dict(
+                    rpn_labels_int32_wide=_labels,
+                    rpn_bbox_targets_wide=_bbox_targets,
+                    rpn_bbox_inside_weights_wide=_bbox_inside_weights,
+                    rpn_bbox_outside_weights_wide=_bbox_outside_weights,
+                    rpn_cls_score_weights_wide=_cls_score_weights
+                )
             )
-        )
+        else:
+            blobs_out.append(
+                dict(
+                    rpn_labels_int32_wide=_labels,
+                    rpn_bbox_targets_wide=_bbox_targets,
+                    rpn_bbox_inside_weights_wide=_bbox_inside_weights,
+                    rpn_bbox_outside_weights_wide=_bbox_outside_weights
+                )
+            )
     return blobs_out[0] if len(blobs_out) == 1 else blobs_out
+
+def _calculateGaussianWeights(anchors, gt_boxes, cls_score_weights, labels, im_info):
+    assert len(labels) == len(cls_score_weights)
+    assert anchors.shape[0] == len(cls_score_weights)
+
+    gk_size = cfg.TRAIN.RPN_GAUSSIAN_KERNEL_SIZE # 255 => 0~254
+    gk_weights = cfg.TRAIN.RPN_GAUSSIAN_WEIGHTS 
+    gkw_normalized_value = cfg.TRAIN.RPN_GAUSSIAN_WEIGHTS_NORMALIZED_VALUE
+    for idx, center_anchor in enumerate(anchors):
+        if labels[idx] != 1:
+            continue
+        top_left_x = ((center_anchor[0] + center_anchor[2]) / 2) - ((gk_size - 1) / 2)
+        top_left_y = ((center_anchor[1] + center_anchor[3]) / 2) - ((gk_size - 1) / 2)
+        bottom_right_x = ((center_anchor[0] + center_anchor[2]) / 2) + ((gk_size - 1) / 2)
+        bottom_right_y = ((center_anchor[1] + center_anchor[3]) / 2) + ((gk_size - 1) / 2)
+
+        # get the index where gt_box inside the range
+        inside_gk = np.where(
+            (gt_boxes[:, 0] >= top_left_x) &
+            (gt_boxes[:, 1] >= top_left_y) &
+            (gt_boxes[:, 2] <= bottom_right_x) &
+            (gt_boxes[:, 3] <= bottom_right_y)
+        )[0]
+        if inside_gk.size != 0:
+            center_anchor_x = (center_anchor[0] + center_anchor[2]) / 2
+            center_anchor_y = (center_anchor[1] + center_anchor[3]) / 2
+            center_anchor_GKindex_x = (gk_size - 1) / 2 # 127
+            center_anchor_GKindex_y = (gk_size - 1) / 2 # 127
+
+            gaussian_value_sum = np.zeros(gk_weights.shape[0])
+            for index in inside_gk:
+                gt_center_x = (gt_boxes[index, 0] + gt_boxes[index, 2]) / 2
+                gt_center_y = (gt_boxes[index, 1] + gt_boxes[index, 3]) / 2
+                # Add shift of index by center-anchor's position and ground-truth's position
+                gt_center_GKindex_x = center_anchor_GKindex_x + (gt_center_x - center_anchor_x) 
+                gt_center_GKindex_y = center_anchor_GKindex_y + (gt_center_y - center_anchor_y)
+                # make sure not to out of bounds (0 ~ 254)
+                gt_center_GKindex_x = np.min([np.max([int(gt_center_GKindex_x), 0]), gk_size - 1])
+                gt_center_GKindex_y = np.min([np.max([int(gt_center_GKindex_y), 0]), gk_size - 1])
+                #print((gt_center_GKindex_x, gt_center_GKindex_y))
+
+                # Add wieghts for 4 direction of gaussian kernels
+                for gk_idx in range(gk_weights.shape[0]):
+                    gaussian_value = gk_weights[gk_idx][gt_center_GKindex_x][gt_center_GKindex_y]
+                    gaussian_value_sum[gk_idx] += gaussian_value
+            cls_score_weights[idx] = np.min(gaussian_value_sum)
+
+            DEBUG = False
+            if DEBUG:
+                gaussian_kernel_test(gk_weights, gk_size)
+                print(im_info[0], im_info[1])
+                img = np.zeros((int(im_info[0]), int(im_info[1])))
+                
+                cx = int(center_anchor_x)
+                cy = int(center_anchor_y)
+                s = 2
+                for x in range(cx-s, cx+s):
+                    for y in range(cy-s ,cy+s):
+                        x = np.min([np.max([x, 0]), im_info[1] - 1])
+                        y = np.min([np.max([y, 0]), im_info[0] - 1])
+                        img[int(y)][int(x)] = 0.5
+                
+                for i in inside_gk:
+                    gx = int((gt_boxes[i, 0] + gt_boxes[i, 2]) / 2)
+                    gy = int((gt_boxes[i, 1] + gt_boxes[i, 3]) / 2)
+                    
+                    s = 2
+                    for x in range(gx-s, gx+s):
+                        for y in range(gy-s ,gy+s):
+                            x = np.min([np.max([x, 0]), im_info[1] - 1])
+                            y = np.min([np.max([y, 0]), im_info[0] - 1])
+                            img[int(y)][int(x)] = 1
+                
+                print('Top-left position: ({0}, {1})'.format(top_left_x, top_left_y))
+                print('Center of predicted box: ({0}, {1})'.format(center_anchor_x, center_anchor_y))
+                print('Bottom-right position: ({0}, {1})'.format(bottom_right_x, bottom_right_y))
+                print('Check recptive field size S:')
+                print(center_anchor_x - top_left_x, center_anchor_y - top_left_y)
+                print(center_anchor_x - bottom_right_x, center_anchor_y - bottom_right_y)
+                print('Gaussian weight score of current predicted box: {0}'.format(gaussian_value_sum))
+                
+                
+                for x in range(int(top_left_x), int(bottom_right_x)):
+                    x1 = int(np.min([np.max([x, 0]), im_info[1] - 1]))
+                    y1 = int(np.min([np.max([top_left_y, 0]), im_info[0] - 1]))
+                    y2 = int(np.min([np.max([bottom_right_y, 0]), im_info[0] - 1]))
+                    img[y1][x1] = 0.25
+                    img[y2][x1] = 0.25
+                        
+                for y in range(int(top_left_y), int(bottom_right_y)):
+                    x1 = int(np.min([np.max([top_left_x, 0]), im_info[1] - 1]))
+                    x2 = int(np.min([np.max([bottom_right_x, 0]), im_info[1] - 1]))
+                    y1 = int(np.min([np.max([y, 0]), im_info[0] - 1]))
+                    img[y1][x1] = 0.25
+                    img[y1][x2] = 0.25
+
+                visualGaussianWeight(img, './check.png')
+
+                assert False
+    # Normalizing cls_score_weights where the wieght is not 1.
+    inds = np.where(cls_score_weights != 1.0)[0]
+    if inds.size != 0:
+        mean_weight = np.sum(cls_score_weights[inds]) / inds.size
+        cls_score_weights[inds] = cls_score_weights[inds] / mean_weight
+        #for idx, value in enumerate(cls_score_weights):
+        #    cls_score_weights[idx] = 1.0 / np.max([value, np.finfo(float).eps])
+    
+    # No normalizing
+    #for idx, value in enumerate(cls_score_weights):
+    #    cls_score_weights[idx] = 1.0 / np.max([value, np.finfo(float).eps])
+
+    return cls_score_weights
+
+def visualGaussianWeight(weightMap, filename):
+    weightMap = np.pad(weightMap, ((10, 10), (10, 10)), "constant")
+    fig = plt.imshow(weightMap, cmap="jet")
+    plt.axis('on') # off
+    fig.axes.get_xaxis().set_visible(True)
+    fig.axes.get_yaxis().set_visible(True)
+    plt.savefig(filename, bbox_inches='tight', pad_inches=0)
+    print('Save image: {0}'.format(filename))
+
+def gaussian_kernel_test(gk_weights, size):
+    mid = int((size - 1) / 2)
+    sum = np.zeros(4)
+
+    # radius 0
+    #
+    # 0 0 0
+    # * * *
+    # 0 0 0
+    #
+    row = mid
+    for col in range(size):
+        sum[0] += gk_weights[0][row][col]
+    
+    # radius 45
+    #
+    # 0 0 *
+    # 0 * 0
+    # * 0 0
+    #
+    for row in range(size):
+        col = (size - 1) - row
+        sum[1] += gk_weights[1][row][col]
+
+    # radius 90
+    #
+    # 0 * 0
+    # 0 * 0
+    # 0 * 0
+    #
+    col = mid
+    for row in range(size):
+        sum[2] += gk_weights[2][row][col]
+    
+    # radius 135
+    #
+    # * 0 0
+    # 0 * 0
+    # 0 0 *
+    #
+    for row in range(size):
+        col = row
+        sum[3] += gk_weights[3][row][col]
+
+    print(sum) # [ 211.42287755  180.4205265   211.42287755  180.4205265 ]

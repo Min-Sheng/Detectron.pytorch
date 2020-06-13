@@ -20,6 +20,8 @@ def get_output_dir(args, run_name):
     """ Get root output directory for each run """
     cfg_filename, _ = os.path.splitext(os.path.split(args.cfg_file)[1])
     cfg_filename = cfg_filename + '_%dshot' % (args.shot)
+    if args.spatially_regularized:
+        cfg_filename = cfg_filename + '_spatial_regular'
     return os.path.join(cfg.OUTPUT_DIR, cfg_filename, run_name)
 
 

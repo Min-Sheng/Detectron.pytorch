@@ -55,14 +55,15 @@ class RoiDataLoader(data.Dataset):
         kernel = np.ones((5,5), np.uint8)
         mask = cv2.dilate(mask, kernel, iterations = 1)
         blobs['binary_mask'] = mask
-
+        query_type = 1
+        
         if self.training:
             # Random choice query catgory
             positive_catgory = blobs['gt_cats']
             negative_catgory = np.array(list(set(self.cat_list) - set(positive_catgory)))
 
             r = random.random()
-            if r < 0.7:
+            if r < cfg.TRAIN.QUERY_POSITIVE_RATE:
                 query_type = 1
                 cand = np.unique(positive_catgory)
                 if len(cand)==1:
@@ -75,7 +76,7 @@ class RoiDataLoader(data.Dataset):
                     p /= p.sum()
                     choice  = np.random.choice(cand,1,p=p)[0]
                 query = self.load_query(choice)
-            elif r >= 0.7 and r < 0.9:
+            elif r >= cfg.TRAIN.QUERY_POSITIVE_RATE and r < cfg.TRAIN.QUERY_POSITIVE_RATE + cfg.TRAIN.QUERY_GLOBAL_NEGATIVE_RATE:
                 query_type = 0
                 im = blobs['data'].copy()
                 binary_mask = blobs['binary_mask'].copy()
@@ -257,7 +258,7 @@ class RoiDataLoader(data.Dataset):
                     return  new_x1, new_y1, new_x2, new_y2
                 q_h, q_w, q_c = im.shape
                 x1, y1, x2, y2 = data['boxes']
-                data['boxes'] = box_aug(q_h, q_w, x1, y1, x2, y2, p=0.5)
+                data['boxes'] = box_aug(q_h, q_w, x1, y1, x2, y2, p=cfg.TRAIN.QUERY_BOX_AUG)
                 
             im = blob_utils.crop(im, data['boxes'], cfg.TRAIN.QUERY_SIZE)
             # flip the channel, since the original one using cv2

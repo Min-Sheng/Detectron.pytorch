@@ -47,7 +47,7 @@ import utils.image as image_utils
 import utils.keypoints as keypoint_utils
 
 
-def im_detect_all(model, im, query, catgory, num_classes, box_proposals=None, timers=None):
+def im_detect_all(model, im, query, query_type, catgory, num_classes, box_proposals=None, timers=None):
     """Process the outputs of model for testing
     Args:
       model: the network module
@@ -65,7 +65,7 @@ def im_detect_all(model, im, query, catgory, num_classes, box_proposals=None, ti
     timers['im_detect_bbox'].tic()
     catgory = catgory[0].item()
     scores, boxes, im_scale, blob_conv, query_conv = im_detect_bbox(
-        model, im, query, cfg.TEST.SCALE, cfg.TEST.MAX_SIZE, box_proposals)
+        model, im, query, query_type, cfg.TEST.SCALE, cfg.TEST.MAX_SIZE, box_proposals)
     timers['im_detect_bbox'].toc()
     # score and boxes are from the whole image after score thresholding and nms
     # (they are not separated by class) (numpy.ndarray)
@@ -100,7 +100,7 @@ def im_detect_all(model, im, query, catgory, num_classes, box_proposals=None, ti
     return cls_boxes, cls_segms, cls_keyps
 
 
-def im_detect_bbox(model, im, query, target_scale, target_max_size, boxes=None):
+def im_detect_bbox(model, im, query, query_type, target_scale, target_max_size, boxes=None):
     """Prepare the bbox for testing"""
 
     inputs, im_scale = _get_blobs(im, boxes, target_scale, target_max_size)
@@ -122,10 +122,12 @@ def im_detect_bbox(model, im, query, target_scale, target_max_size, boxes=None):
         inputs['data'] = [Variable(torch.from_numpy(inputs['data']), volatile=True)]
         inputs['query'] = query
         inputs['im_info'] = [Variable(torch.from_numpy(inputs['im_info']), volatile=True)]
+        inputs['query_type'] = query_type
     else:
         inputs['data'] = [torch.from_numpy(inputs['data'])]
         inputs['query'] = query
         inputs['im_info'] = [torch.from_numpy(inputs['im_info'])]
+        inputs['query_type'] = query_type
 
     return_dict = model(**inputs)
 

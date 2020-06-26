@@ -111,6 +111,12 @@ def mask_rcnn_losses(masks_pred, masks_int32, mask_rois, query_type):
 # Mask heads
 # ---------------------------------------------------------------------------- #
 
+def mask_rcnn_fcn_head_v1up4convs_co(dim_in, roi_xform_func, spatial_scale):
+    """v1up design: 4 * (conv 3x3), convT 2x2."""
+    return mask_rcnn_fcn_head_v1upXconvs_co(
+        dim_in, roi_xform_func, spatial_scale, 4
+    )
+
 def mask_rcnn_fcn_head_v1up4convs(dim_in, roi_xform_func, spatial_scale):
     """v1up design: 4 * (conv 3x3), convT 2x2."""
     return mask_rcnn_fcn_head_v1upXconvs(
@@ -131,6 +137,71 @@ def mask_rcnn_fcn_head_v1up(dim_in, roi_xform_func, spatial_scale):
         dim_in, roi_xform_func, spatial_scale, 2
     )
 
+class mask_rcnn_fcn_head_v1upXconvs_co(nn.Module):
+    """v1upXconvs design: X * (conv 3x3), convT 2x2."""
+    def __init__(self, dim_in, roi_xform_func, spatial_scale, num_convs):
+        super().__init__()
+        dim_in = dim_in * 2
+        self.dim_in = dim_in
+        self.roi_xform = roi_xform_func
+        self.spatial_scale = spatial_scale
+        self.num_convs = num_convs
+
+        dilation = cfg.MRCNN.DILATION
+        dim_inner = cfg.MRCNN.DIM_REDUCED
+        self.dim_out = dim_inner
+
+        module_list = []
+        for i in range(num_convs):
+            module_list.extend([
+                nn.Conv2d(dim_in, dim_inner, 3, 1, padding=1*dilation, dilation=dilation),
+                nn.ReLU(inplace=True)
+            ])
+            dim_in = dim_inner
+        self.conv_fcn = nn.Sequential(*module_list)
+
+        # upsample layer
+        self.upconv = nn.ConvTranspose2d(dim_inner, dim_inner, 2, 2, 0)
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+            if cfg.MRCNN.CONV_INIT == 'GaussianFill':
+                init.normal_(m.weight, std=0.001)
+            elif cfg.MRCNN.CONV_INIT == 'MSRAFill':
+                mynn.init.MSRAFill(m.weight)
+            else:
+                raise ValueError
+            init.constant_(m.bias, 0)
+
+    def detectron_weight_mapping(self):
+        mapping_to_detectron = {}
+        for i in range(self.num_convs):
+            mapping_to_detectron.update({
+                'conv_fcn.%d.weight' % (2*i): '_[mask]_fcn%d_w' % (i+1),
+                'conv_fcn.%d.bias' % (2*i): '_[mask]_fcn%d_b' % (i+1)
+            })
+        mapping_to_detectron.update({
+            'upconv.weight': 'conv5_mask_w',
+            'upconv.bias': 'conv5_mask_b'
+        })
+
+        return mapping_to_detectron, []
+
+    def forward(self, x, y, rpn_ret):
+        x, query_feat = self.roi_xform(
+            x, rpn_ret,
+            blob_rois='mask_rois',
+            method=cfg.MRCNN.ROI_XFORM_METHOD,
+            resolution=cfg.MRCNN.ROI_XFORM_RESOLUTION,
+            spatial_scale=self.spatial_scale,
+            sampling_ratio=cfg.MRCNN.ROI_XFORM_SAMPLING_RATIO,
+            query_blobs_in=y
+        )
+        x = torch.cat((x, query_feat), dim=1)
+        x = self.conv_fcn(x)
+        return F.relu(self.upconv(x), inplace=True)
 
 class mask_rcnn_fcn_head_v1upXconvs(nn.Module):
     """v1upXconvs design: X * (conv 3x3), convT 2x2."""

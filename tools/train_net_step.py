@@ -8,7 +8,7 @@ import resource
 import traceback
 import logging
 from collections import defaultdict
-
+import random
 import numpy as np
 import yaml
 import torch
@@ -30,6 +30,7 @@ from utils.logging import setup_logging
 from utils.timer import Timer
 from utils.training_stats import TrainingStats
 from utils.logging import log_stats
+from utils.gaussian_kernel_generate import Gaussain_kernel_generate
 
 # Set up logging and load config options
 logger = setup_logging(__name__)
@@ -119,6 +120,16 @@ def parse_args():
     parser.add_argument('--k', dest='shot',
                     help='k shot query',
                     default=1, type=int)
+    parser.add_argument(
+        '--spatially_regularized', help='Apply the spatially regularized loss',
+        action='store_true')
+    parser.add_argument(
+        '--fssun', help='Apply the few-shot spatially unification network',
+        action='store_true')
+    parser.add_argument(
+        '--random_seed',
+        help='Set the random seed.',
+        default=3, type=int)
     return parser.parse_args()
 
 
@@ -174,7 +185,26 @@ def main():
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs)
 
+    cfg.RNG_SEED = args.random_seed
+    if cfg.RNG_SEED is None:
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+    else:
+        print('Make the experiment results deterministic.')
+        random.seed(cfg.RNG_SEED)
+        np.random.seed(cfg.RNG_SEED)
+        torch.manual_seed(cfg.RNG_SEED)
+        torch.cuda.manual_seed_all(cfg.RNG_SEED)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     cfg.SEEN = args.seen
+    if args.spatially_regularized:
+        cfg.TRAIN.RPN_SPATIALLY_REGULARIZED = True
+        # pre-calculated Gaussian weights 
+        cfg.TRAIN.RPN_GAUSSIAN_WEIGHTS, cfg.TRAIN.RPN_GAUSSIAN_WEIGHTS_NORMALIZED_VALUE = Gaussain_kernel_generate(cfg.TRAIN.RPN_GAUSSIAN_KERNEL_SIZE)
+    if args.fssun:
+        cfg.FSSUN = True
 
     ### Adaptively adjust some configs ###
     original_batch_size = cfg.NUM_GPUS * cfg.TRAIN.IMS_PER_BATCH

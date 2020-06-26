@@ -81,6 +81,9 @@ def parse_args():
     parser.add_argument('--k', dest='checkshot',
                     help='k shot query',
                     default=1, type=int)
+    parser.add_argument(
+        '--fssun', help='Apply the few-shot spatially unification network',
+        action='store_true')
     return parser.parse_args()
 
 def main():
@@ -114,6 +117,9 @@ def main():
 
     cfg.VIS = args.vis
     cfg.SEEN = args.seen
+
+    if args.fssun:
+        cfg.FSSUN = True
 
     if args.dataset == "fss_cell":
         cfg.TEST.DATASETS = ('fss_cell_test',)
@@ -359,7 +365,8 @@ def main():
                         box_alpha = 0.6,
                         dataset = imdb,
                         show_class = False,
-                        class_name = class_name
+                        class_name = class_name,
+                        draw_bbox = True
                     )
                  
                 gt_save_name = os.path.join(sample_output_dir, os.path.basename('{:d}_{:s}'.format(i, file_name)) + '_gt.pdf')

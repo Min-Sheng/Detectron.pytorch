@@ -22,6 +22,8 @@ import utils.net as net_utils
 import utils.resnet_weights_helper as resnet_utils
 
 import modeling.matching as matching
+#import modeling.attention as attention
+import modeling.stn as stn
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +82,17 @@ class Generalized_RCNN(nn.Module):
         self.mapping_to_detectron = None
         self.orphans_in_detectron = None
 
+        if cfg.FSSUN:
+            self.fssun_net = stn.FSSUN(in_channels=3, kernel_size=3)
+
         # Backbone for feature extraction
         self.Conv_Body = get_func(cfg.MODEL.CONV_BODY)()
 
         # Matching Mechanism
         self.match_net = matching.match_block(self.Conv_Body.dim_out)
+        #self.sa = attention.PAM_Module(self.Conv_Body.dim_out)
+        #self.sc = attention.CAM_Module(self.Conv_Body.dim_out)
+        #self.global_avgpool = nn.AdaptiveAvgPool2d(1)
 
         # Region Proposal Network
         if cfg.RPN.RPN_ON:
@@ -173,7 +181,13 @@ class Generalized_RCNN(nn.Module):
         query_conv = []
         shot = len(query)
         for i in range(shot):
-            query_conv.append(self.Conv_Body(query[i]))
+            if cfg.FSSUN:
+                #print(query[i].shape) #[N * C * 128 * 128]
+                transformed_query = self.fssun_net(query[i])
+                #print(transformed_query.shape) #[N * C * 128 * 128]
+                query_conv.append(self.Conv_Body(transformed_query))
+            else:
+                query_conv.append(self.Conv_Body(query[i]))
         
         def pooling(feats, method='avg', dim = 0):
             feats = torch.stack(feats)
@@ -194,7 +208,9 @@ class Generalized_RCNN(nn.Module):
             
             if len(blob_conv) == 5:
                 start_match_idx = 1
-                rpn_feat.append(blob_conv[0])
+                #sa_blob_conv = self.sa(blob_conv[0])
+                sa_blob_conv = blob_conv[0]
+                rpn_feat.append(sa_blob_conv)
             else:
                 start_match_idx = 0
 
@@ -204,11 +220,35 @@ class Generalized_RCNN(nn.Module):
                 act_feat.append(_act_feat)
                 act_aim.append(_act_aim)
                 c_weight.append(_c_weight)
-
+                """
+                correlation = []
+                QP_pool = self.global_avgpool(QP)
+                #IP_sa = self.sa(IP)
+                IP_sa = IP
+                for IP_sa_batch, QP_pool_batch in zip(IP_sa, QP_pool):
+                    IP_sa_batch, QP_pool_batch = IP_sa_batch.unsqueeze(0), QP_pool_batch.unsqueeze(0)
+                    correlation.append(F.conv2d(IP_sa_batch, QP_pool_batch.permute(1,0,2,3), groups=IP.shape[1]).squeeze(0))
+                correlation = torch.stack(correlation)
+                rpn_feat.append(correlation)
+                act_feat.append(correlation)
+                act_aim.append(QP)
+                """
         else:
             query_conv = pooling(query_conv)
             rpn_feat, act_feat, act_aim, c_weight = self.match_net(blob_conv, query_conv)
-        
+            """
+            correlation = []
+            QP_pool = self.global_avgpool(QP)
+            #IP_sa = self.sa(IP)
+            IP_sa = IP
+            for IP_sa_batch, QP_pool_batch in zip(IP_sa, QP_pool):
+                IP_sa_batch, QP_pool_batch = IP_sa_batch.unsqueeze(0), QP_pool_batch.unsqueeze(0)
+                correlation.append(F.conv2d(IP_sa_batch, QP_pool_batch.permute(1,0,2,3), groups=IP.shape[1]).squeeze(0))
+            correlation = torch.stack(correlation)
+            rpn_feat = correlation
+            act_feat = correlation
+            act_aim = query_conv
+            """
         rpn_ret = self.RPN(rpn_feat, im_info, roidb)
 
         # if self.training:
@@ -272,7 +312,8 @@ class Generalized_RCNN(nn.Module):
                     mask_feat = self.Mask_Head(res5_feat, rpn_ret,
                                                roi_has_mask_int32=rpn_ret['roi_has_mask_int32'])
                 else:
-                    mask_feat = self.Mask_Head(act_feat, rpn_ret)
+                    mask_feat = self.Mask_Head(act_feat, act_aim, rpn_ret)
+                    #mask_feat = self.Mask_Head(act_feat, rpn_ret)
                 mask_pred = self.Mask_Outs(mask_feat)
                 # return_dict['mask_pred'] = mask_pred
                 # mask loss
@@ -359,7 +400,7 @@ class Generalized_RCNN(nn.Module):
                     elif method == 'RoIAlign':
                         xform_out = ROIAlign((
                             resolution, resolution), sc, sampling_ratio)(bl_in, rois)
-                    if blob_rois == 'rois':
+                    if blob_rois == 'rois' or blob_rois == 'mask_rois':
                         query_bl_in = query_blobs_in[k_max - lvl]
                         query_bl_in = query_bl_in[batch_idxs]
                         query_bl_in = F.interpolate(query_bl_in, size=[resolution, resolution], mode="bilinear")
@@ -376,7 +417,7 @@ class Generalized_RCNN(nn.Module):
             restore_bl = Variable(
                 torch.from_numpy(restore_bl.astype('int64', copy=False))).cuda(device_id)
             xform_out = xform_shuffled[restore_bl]
-            if blob_rois == 'rois':
+            if blob_rois == 'rois' or blob_rois == 'mask_rois':
                 query_xform_shuffled = torch.cat(query_bl_out_list, dim=0)
                 query_xform_out = query_xform_shuffled[restore_bl]
                 return xform_out, query_xform_out
@@ -402,7 +443,7 @@ class Generalized_RCNN(nn.Module):
             elif method == 'RoIAlign':
                 xform_out = ROIAlign((
                     resolution, resolution), spatial_scale, sampling_ratio)(blobs_in, rois)
-            if blob_rois == 'rois':
+            if blob_rois == 'rois' or blob_rois == 'mask_rois':
                 query_blobs_in = query_blobs_in[batch_idxs]
                 query_blobs_in = F.interpolate(query_blobs_in, size=[resolution, resolution], mode="bilinear")
                 return xform_out, query_blobs_in
@@ -420,9 +461,10 @@ class Generalized_RCNN(nn.Module):
         return blob_conv
 
     @check_inference
-    def mask_net(self, blob_conv, rpn_blob):
+    def mask_net(self, blob_conv, query_conv, rpn_blob):
         """For inference"""
-        mask_feat = self.Mask_Head(blob_conv, rpn_blob)
+        #mask_feat = self.Mask_Head(blob_conv, rpn_blob)
+        mask_feat = self.Mask_Head(blob_conv, query_conv, rpn_blob)
         mask_pred = self.Mask_Outs(mask_feat)
         return mask_pred
 

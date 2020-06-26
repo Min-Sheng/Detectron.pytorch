@@ -25,7 +25,7 @@ __C = AttrDict()
 cfg = __C
 
 __C.SEEN = 1
-
+__C.FSSUN = False
 
 # Random note: avoid using '.ON' as a config key since yaml converts it to True;
 # prefer 'ENABLED' instead
@@ -47,9 +47,9 @@ __C.TRAIN.CATEGORIES = [1]
 # If multiple scales are listed, then one is selected uniformly at random for
 # each training image (i.e., scale jitter data augmentation)
 __C.TRAIN.SCALES = (600, )
-__C.TRAIN.QUERY_SIZE = 64
-__C.TRAIN.QUERY_POSITIVE_RATE = 0.9
-__C.TRAIN.QUERY_GLOBAL_NEGATIVE_RATE = 0.05
+__C.TRAIN.QUERY_SIZE = 128
+__C.TRAIN.QUERY_POSITIVE_RATE = 0.8
+__C.TRAIN.QUERY_GLOBAL_NEGATIVE_RATE = 0.2
 __C.TRAIN.QUERY_BOX_AUG = 0.35
 
 # Max pixel size of the longest side of a scaled input image

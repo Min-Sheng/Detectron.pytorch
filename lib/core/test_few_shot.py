@@ -218,8 +218,8 @@ def im_detect_mask(model, im_scale, boxes, blob_conv, query_conv):
 
     else:
         rpn_feat, act_feat, act_aim, c_weight = model.module.match_net(blob_conv, query_conv)
-    #pred_masks = model.module.mask_net(act_feat, act_aim, inputs)
-    pred_masks = model.module.mask_net(act_feat, inputs)
+    pred_masks = model.module.mask_net(act_feat, act_aim, inputs)
+    #pred_masks = model.module.mask_net(act_feat, inputs)
     pred_masks = pred_masks.data.cpu().numpy().squeeze()
 
     if cfg.MRCNN.CLS_SPECIFIC_MASK:

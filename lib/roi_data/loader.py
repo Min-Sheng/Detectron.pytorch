@@ -63,7 +63,7 @@ class RoiDataLoader(data.Dataset):
             negative_catgory = np.array(list(set(self.cat_list) - set(positive_catgory)))
 
             r = random.random()
-            if r < cfg.TRAIN.QUERY_POSITIVE_RATE:
+            if r <= cfg.TRAIN.QUERY_POSITIVE_RATE:
                 query_type = 1
                 cand = np.unique(positive_catgory)
                 if len(cand)==1:
@@ -76,7 +76,7 @@ class RoiDataLoader(data.Dataset):
                     p /= p.sum()
                     choice  = np.random.choice(cand,1,p=p)[0]
                 query = self.load_query(choice)
-            elif r >= cfg.TRAIN.QUERY_POSITIVE_RATE and r < cfg.TRAIN.QUERY_POSITIVE_RATE + cfg.TRAIN.QUERY_GLOBAL_NEGATIVE_RATE:
+            elif r > cfg.TRAIN.QUERY_POSITIVE_RATE and r <= cfg.TRAIN.QUERY_POSITIVE_RATE + cfg.TRAIN.QUERY_GLOBAL_NEGATIVE_RATE:
                 query_type = 0
                 im = blobs['data'].copy()
                 binary_mask = blobs['binary_mask'].copy()
@@ -84,6 +84,7 @@ class RoiDataLoader(data.Dataset):
                 if len(patch) == self.shot:
                     query = patch
                 else:
+                    print("No bg")
                     query_type = 0
                     cand = negative_catgory
                     choice  = np.random.choice(cand,1)[0]
@@ -95,7 +96,8 @@ class RoiDataLoader(data.Dataset):
                 query = self.load_query(choice)
 
         else:
-            query = self.load_query(index, single_db[0]['id'])
+            #query = self.load_query(index, single_db[0]['id'])
+            query = self.crop_query(single_db, index, single_db[0]['id'])
 
         blobs['query'] = query
         blobs['query_type'] = query_type
@@ -129,7 +131,7 @@ class RoiDataLoader(data.Dataset):
             blobs['choice'] = choice
             return blobs
 
-    def sample_bg(self, im, mask, patch_size=128, T=10000):
+    def sample_bg(self, im, mask, patch_size=256, T=10000):
         _, height, width = im.shape
         t = 0
         n = 0
@@ -143,9 +145,8 @@ class RoiDataLoader(data.Dataset):
                 im_patch = im_patch.transpose((1, 2, 0))
                 if random.randint(0,99)/100 > 0.5:
                     im_patch = im_patch[:, ::-1, :]
-                if patch_size > 64:
-                    im_patch = cv2.resize(im_patch, (64, 64), interpolation=cv2.INTER_LINEAR)
-                patches.append(im_patch.transpose((2, 0, 1)).copy())
+                im_patch, _ = blob_utils.prep_bg_for_blob(im_patch, [cfg.TRAIN.QUERY_SIZE], cfg.TRAIN.MAX_SIZE)
+                patches.append(blob_utils.im_list_to_blob(im_patch).squeeze(0))
                 n = n + 1
             t = t + 1
         return patches
@@ -210,6 +211,43 @@ class RoiDataLoader(data.Dataset):
             np.clip(boxes[:, 0], 0, size_crop - 1, out=boxes[:, 0])
             np.clip(boxes[:, 2], 0, size_crop - 1, out=boxes[:, 2])
             blobs['roidb'][0]['boxes'] = boxes
+
+    def crop_query(self, roidb, choice, id=0):
+        if not self.training:
+             # Take out the purpose category for testing
+            catgory = self.cat_list[choice]
+
+            path = roidb[0]['image']
+            all_box = roidb[0]['boxes']
+            all_cats = np.array(roidb[0]['gt_cats'])
+            target_idx = np.where(all_cats == catgory)[0]
+            #print(target_idx)
+
+            # Use image_id to determine the random seed
+            # The list l is candidate sequence, which random by image_id
+            random.seed(id)
+            l = list(range(len(target_idx)))
+            random.shuffle(l)
+
+            # choose the candidate sequence and take out the data information
+            position=[l[(self.query_position+i)%len(l)] for i in range(self.shot)]
+            picked_box_idx  = [target_idx[i] for i in position]
+            picked_box = all_box[picked_box_idx ,:]
+            ori_im = imread(path)
+            if len(ori_im.shape) == 2:
+                ori_im = ori_im[:,:,np.newaxis]
+                ori_im = np.concatenate((ori_im,ori_im,ori_im), axis=2)
+            if roidb[0]['flipped']:
+                ori_im = ori_im[:, ::-1, :]
+            query = []
+            for box in picked_box:
+                im = ori_im.copy()
+                im = blob_utils.crop(im, box, cfg.TRAIN.QUERY_SIZE)
+                im, im_scale = blob_utils.prep_im_for_blob(im, cfg.PIXEL_MEANS, [cfg.TRAIN.QUERY_SIZE],
+                        cfg.TRAIN.MAX_SIZE)
+                query.append(blob_utils.im_list_to_blob(im).squeeze(0))
+              
+            return query
 
     def load_query(self, choice, id=0, aug=True):
         
